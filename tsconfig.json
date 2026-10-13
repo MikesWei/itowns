@@ -1,0 +1,11 @@
+{
+    "files": [],
+    "include": [],
+    "references": [
+        { "path": "./packages/Geographic" },
+        { "path": "./packages/Main" },
+        { "path": "./packages/Debug" },
+        { "path": "./packages/Widgets" },
+        { "path": "./examples/demo" }
+    ]
+}

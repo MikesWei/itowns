@@ -1,0 +1,107 @@
+<html>
+    <head>
+        <title>Itowns - Parsing VRT + CSV</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "dat": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js",
+                "GuiTools": "./jsm/GUI/GuiTools.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "CSVnVRTParser": "./jsm/plugins/CSVnVRTParser.js",
+                "FeatureToolTip": "./jsm/plugins/FeatureToolTip.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "papaparse": "https://esm.sh/papaparse@5.5.2",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+        </script>
+        <meta charset="UTF-8">
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body>
+        <div id="viewerDiv"></div>
+        <script type="module">
+
+            import GuiTools from 'GuiTools';
+            import setupLoadingScreen from 'LoadingScreen';
+            import * as THREE from 'three';
+            import * as itowns from 'itowns';
+            import * as debug from 'debug';
+            import * as itowns_widgets from 'itowns_widgets';
+            import CSVnVRTParser from 'CSVnVRTParser';
+            import FeatureToolTip from 'FeatureToolTip';
+            import Papa from 'papaparse';
+
+            // Define initial camera position
+            var placement = {
+                coord: new itowns.Coordinates('EPSG:4326', 2.351323, 48.856712),
+                range: 25000,
+            }
+
+            // `viewerDiv` will contain iTowns' rendering area (`<canvas>`)
+            var viewerDiv = document.getElementById('viewerDiv');
+
+            // Instanciate iTowns GlobeView*
+            var view = new itowns.GlobeView(viewerDiv, placement);
+            var menuGlobe = new GuiTools('menuDiv', view);
+
+            setupLoadingScreen(viewerDiv, view);
+            FeatureToolTip.init(viewerDiv, view);
+
+            // Add one imagery layer to the scene
+            // This layer is defined in a json file but it could be defined as a plain js
+            // object. See Layer* for more info.
+            itowns.Fetcher.json('./layers/JSONLayers/OPENSM.json').then(function _(config) {
+                config.source = new itowns.TMSSource(config.source);
+                var layer = new itowns.ColorLayer('OPENSM', config);
+                view.addLayer(layer).then(menuGlobe.addLayerGUI.bind(menuGlobe));
+            });
+
+            // In this case, a VRT is associated to a CSV
+            itowns.Fetcher.multiple('https://raw.githubusercontent.com/iTowns/iTowns2-sample-data/master/vrt/velib-disponibilite-en-temps-reel', {
+                xml: ['vrt'],
+                text: ['csv'],
+            }).then(function _(res) {
+                res.csv = Papa.parse(res.csv.trim()).data;
+                return CSVnVRTParser.parse(res, { out: {
+                    crs: view.tileLayer.extent.crs,
+                }});
+            }).then(function _(features) {
+                var velibSource = new itowns.FileSource({ features });
+
+                var velibLayer = new itowns.ColorLayer('velib', {
+                    source: velibSource,
+                    style: {
+                        zoom: { min: 10, max: 20 },
+                        point: {
+                            color: 'cyan',
+                            line: 'red',
+                            radius: 3,
+                        },
+                        text: {
+                            field: '{name}\nCapacity: {Capacity}',
+                            haloColor: 'white',
+                            haloWidth: 1,
+                        },
+                    },
+                    addLabelLayer: true,
+                });
+
+                return view.addLayer(velibLayer);
+            }).then(function _(layer) {
+                FeatureToolTip.addLayer(layer, { filterAllProperties: false });
+            });
+            window.view = view;
+            window.itowns = itowns;
+            window.THREE = THREE;
+
+        </script>
+    </body>
+</html>

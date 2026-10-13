@@ -1,0 +1,141 @@
+import assert from 'assert';
+import { Vector3 } from 'three';
+import View from 'Core/View';
+import GlobeView from 'Core/Prefab/GlobeView';
+import { Coordinates } from '@itowns/geographic';
+import EntwinePointTileSource from 'Source/EntwinePointTileSource';
+import EntwinePointTileLayer from 'Layer/EntwinePointTileLayer';
+import * as sinon from 'sinon';
+import Fetcher from 'Provider/Fetcher';
+import LASParser from 'Parser/LASParser';
+import Renderer from './bootstrap';
+
+import eptFile from '../data/entwine/ept.json';
+import eptHierarchy0000File from '../data/entwine/ept-hierarchy/0-0-0-0.json';
+import eptHierarchy1001File from '../data/entwine/ept-hierarchy/1-0-0-1.json';
+
+const baseurl = 'https://raw.githubusercontent.com/iTowns/iTowns2-sample-data/master/pointclouds/entwine';
+
+const eptSsAuthority = JSON.parse(eptFile);
+eptSsAuthority.srs = {
+    wkt: 'PROJCS["RGF93 v1 / Lambert-93",GEOGCS["RGF93 v1",DATUM["Reseau_Geodesique_Francais_1993_v1",SPHEROID["GRS 1980",6378137,298.257222101],TOWGS84[0,0,0,0,0,0,0]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4171"]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["latitude_of_origin",46.5],PARAMETER["central_meridian",3],PARAMETER["standard_parallel_1",49],PARAMETER["standard_parallel_2",44],PARAMETER["false_easting",700000],PARAMETER["false_northing",6600000],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","2154"]]',
+};
+
+const resources = {
+    [`${baseurl}/ept.json`]: JSON.parse(eptFile),
+    'withoutAutority/ept.json': eptSsAuthority,
+    [`${baseurl}/ept-hierarchy/0-0-0-0.json`]: JSON.parse(eptHierarchy0000File),
+    [`${baseurl}/ept-hierarchy/1-0-0-1.json`]: JSON.parse(eptHierarchy1001File),
+};
+
+describe('Entwine Point Tile', function () {
+    let source;
+    let stubFetcherJson;
+    let stubFetcherArrayBuf;
+
+    before(function () {
+        stubFetcherJson = sinon.stub(Fetcher, 'json')
+            .callsFake(url => Promise.resolve(resources[url]));
+        stubFetcherArrayBuf = sinon.stub(Fetcher, 'arrayBuffer')
+            .callsFake(() => Promise.resolve(new ArrayBuffer()));
+        // currently no test on data fetched...
+
+        LASParser.enableLazPerf('../../examples/libs/laz-perf');
+    });
+
+    after(function () {
+        stubFetcherJson.restore();
+        stubFetcherArrayBuf.restore();
+    });
+
+    describe('Entwine Point Tile Source', function () {
+        describe('data type', function () {
+            // TO DO dataType in [laszip, binary, zstandard]
+        });
+        describe('retrieving crs from srs information', function () {
+            it('No srs authority', (done) => {
+                source = new EntwinePointTileSource({
+                    url: 'withoutAutority',
+                });
+                source.whenReady
+                    .then(() => {
+                        assert.equal(source.crs, 'EPSG:2154');
+                        done();
+                    }).catch(done);
+            });
+            it('With srs authority', (done) => {
+                source = new EntwinePointTileSource({
+                    url: 'https://raw.githubusercontent.com/iTowns/iTowns2-sample-data/master/pointclouds/entwine',
+                });
+                source.whenReady
+                    .then(() => {
+                        assert.equal(source.crs, 'EPSG:3857');
+                        done();
+                    }).catch(done);
+            });
+        });
+    });
+
+    describe('Entwine Point Tile Layer', function () {
+        let renderer;
+        let view;
+        let layer;
+        let context;
+
+        before(function (done) {
+            renderer = new Renderer();
+            view = new GlobeView(renderer.domElement, {}, { renderer });
+            layer = new EntwinePointTileLayer('testEptLayer', { source });
+
+            context = {
+                camera: view.camera,
+                engine: view.mainLoop.gfxEngine,
+                scheduler: view.mainLoop.scheduler,
+                geometryLayer: layer,
+                view,
+            };
+
+            View.prototype.addLayer.call(view, layer)
+                .then(() => {
+                    done();
+                }).catch(done);
+        });
+
+        it('pre updates and finds the root', () => {
+            const element = layer.preUpdate(context, new Set([layer]));
+            assert.strictEqual(element.length, 1);
+            assert.deepStrictEqual(element[0], layer.root);
+        });
+
+        // The 2 following tests are fragile and their intentions are unclear.
+        // They should be rewritten - see issue #2645.
+        it('tries to update on the root and fails', function () {
+            const cam = context.camera.camera3D;
+            const originalQuaternion = cam.quaternion.clone();
+            cam.quaternion.identity(); // look away from dataset
+            layer.update(context, layer, layer.root);
+            assert.strictEqual(layer.root.promise, null);
+            cam.quaternion.copy(originalQuaternion);
+        });
+
+        it('tries to update on the root and succeeds', function (done) {
+            const lookAt = new Vector3();
+            const coord = new Coordinates(view.referenceCrs).setFromVector3(layer.root.voxelOBB.box3D.getCenter(lookAt));
+            view.controls.lookAtCoordinate({
+                coord,
+                range: 2e7,
+            }, false)
+                .then(() => {
+                    layer.update(context, layer, layer.root);
+                    layer.root.promise
+                        .then(() => {
+                            done();
+                        });
+                }).catch(done);
+        });
+
+        it('post updates', function () {
+            layer.postUpdate(context, layer);
+        });
+    });
+});

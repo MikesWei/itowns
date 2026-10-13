@@ -1,15 +1,14 @@
 {
-    "type": "color",
-    "protocol": "wmtsc",
-	"networkOptions": { "crossOrigin" : "anonymous" },
     "id": "DARK",
-    "customUrl": "http://a.basemaps.cartocdn.com/dark_all/%TILEMATRIX/%COL/%ROW.png",
-    "options": {
+    "source": {
+        "crs": "EPSG:3857",
+	    "networkOptions": { "crossOrigin" : "anonymous" },
+        "format": "image/png",
+        "url": "http://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
     	"attribution": {
     		"name":"CARTO",
     		"url": "https://carto.com/"
     	},
-        "tileMatrixSet": "PM",
-        "mimetype": "image/png"
+        "tileMatrixSet": "PM"
     }
 }

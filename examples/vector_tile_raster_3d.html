@@ -1,0 +1,96 @@
+<html>
+    <head>
+        <title>Itowns - Globe + vector-tiles</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "dat": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js",
+                "GuiTools": "./jsm/GUI/GuiTools.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+        </script>
+
+        <meta charset="UTF-8">
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/noto.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body>
+        <div id="viewerDiv"></div>
+        <div id="debug" width="400" height="300"></div>
+        <script type="module">
+
+            import GuiTools from 'GuiTools';
+            import setupLoadingScreen from 'LoadingScreen';
+            import * as THREE from 'three';
+            import * as itowns from 'itowns';
+            import * as debug from 'debug';
+            import * as itowns_widgets from 'itowns_widgets';
+            // # Simple Globe viewer + a vector tile layer
+
+            // Define initial camera position
+            var placement = {
+                coord: new itowns.Coordinates('EPSG:4326', 2.475, 48.807),
+                range: 12000000,
+            }
+            var promises = [];
+
+            // `viewerDiv` will contain iTowns' rendering area (`<canvas>`)
+            var viewerDiv = document.getElementById('viewerDiv');
+
+            // Instanciate iTowns GlobeView*
+            const view = new itowns.GlobeView(viewerDiv, placement);
+
+            // define pole texture
+            view.tileLayer.noTextureColor = new THREE.Color(0x95c1e1);
+
+            setupLoadingScreen(viewerDiv, view);
+
+            promises.push(itowns.Fetcher.json('./layers/JSONLayers/Ortho.json').then(function _(config) {
+                config.source = new itowns.WMTSSource(config.source);
+                var layer = new itowns.ColorLayer('Ortho', config);
+                return view.addLayer(layer);
+            }));
+
+            // Define a VectorTilesSource to load Vector Tiles data from the geoportail
+            var mvtSource = new itowns.VectorTilesSource({
+                style: "https://data.geopf.fr/annexes/ressources/vectorTiles/styles/PLAN.IGN/standard.json",
+                // We don't display mountains related data to ease visualisation
+                filter: (layer) => !layer['source-layer'].includes('oro_') && !layer['source-layer'].includes('parcellaire'),
+            });
+
+            var mvtLayer = new itowns.ColorLayer('MVT', {
+                source: mvtSource,
+                effect_type: itowns.colorLayerEffects.removeLightColor,
+                effect_parameter: 2.5,
+                addLabelLayer: { performance: true },
+            });
+
+            view.addLayer(mvtLayer);
+
+            var menuGlobe = new GuiTools('menuDiv', view, 300);
+            // Listen for globe full initialisation event
+            view.addEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, function () {
+                Promise.all(promises).then(function () {
+                    menuGlobe.addImageryLayersGUI(view.getLayers(function (l) { return l.isColorLayer; }));
+                    itowns.ColorLayersOrdering.moveLayerToIndex(view, 'Ortho', 0);
+                }).catch(console.error);
+            });
+
+            debug.createTileDebugUI(menuGlobe.gui, view);
+            window.view = view;
+            window.itowns = itowns;
+            window.THREE = THREE;
+
+        </script>
+    </body>
+</html>

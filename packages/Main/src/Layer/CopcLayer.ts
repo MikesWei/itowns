@@ -1,0 +1,59 @@
+import PointCloudLayer, { type PointCloudLayerParameters } from 'Layer/PointCloudLayer';
+import CopcNode from 'Core/CopcNode';
+import type CopcSource from 'Source/CopcSource';
+
+interface CopcLayerParameters extends PointCloudLayerParameters {
+    source: CopcSource;
+}
+
+/**
+ * A layer for [Cloud Optimised Point Cloud](https://copc.io) (COPC) datasets.
+ * See {@link PointCloudLayer} class for documentation on base properties.
+ *
+ * @example
+ * // Create a new COPC layer
+ * const copcSource = new CopcSource(\{
+ *     url: 'https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz',
+ *     crs: 'EPSG:4978',
+ *     colorDepth: 16, // bit-depth of 'color' attribute (either 8 or 16 bits)
+ * \});
+ *
+ * const copcLayer = new CopcLayer('COPC', \{
+ *     source: copcSource,
+ * \});
+ *
+ * View.prototype.addLayer.call(view, copcLayer);
+ */
+class CopcLayer extends PointCloudLayer {
+    readonly isCopcLayer: true;
+
+    source: CopcSource;
+    /**
+     * @param id - Unique id of the layer.
+     * @param config - See {@link PointCloudLayer} for base pointcloud options.
+     */
+    constructor(id: string, config: CopcLayerParameters) {
+        super(id, config);
+        this.isCopcLayer = true;
+        this.source = config.source;
+
+        const setRootNode = this.source.whenReady.then((source) => {
+            this.setElevationRange();
+
+            const { cube, rootHierarchyPage } = source.info;
+            const rootHierarchy = {
+                nodes: {},
+                pages: { '0-0-0-0': rootHierarchyPage },
+            };
+            this.root = new CopcNode(0, 0, 0, 0, source, this.crs, rootHierarchy);
+            this.root.voxelOBB.setFromArray(cube).projOBB(source.crs, this.crs);
+            this.root.clampOBB.copy(this.root.voxelOBB).clampZ(source.zmin, source.zmax);
+
+            return this.root;
+        });
+
+        this._promises.push(setRootNode);
+    }
+}
+
+export default CopcLayer;

@@ -1,15 +1,14 @@
 {
-    "type": "color",
-    "protocol": "wmtsc",
-    "networkOptions": { "crossOrigin" : "anonymous" },
     "id": "OPENSM",
-    "customUrl": "http://a.basemaps.cartocdn.com/voyager/%TILEMATRIX/%COL/%ROW.png",
-    "options": {
+    "source": {
+        "crs": "EPSG:3857",
+        "isInverted": true,
+        "format": "image/png",
+        "url": "https://tile.openstreetmap.org/${z}/${x}/${y}.png",
         "attribution": {
-            "name":"CARTO",
-            "url": "https://carto.com/"
+            "name":"OpenStreetMap",
+            "url": "http://www.openstreetmap.org/"
         },
-        "tileMatrixSet": "PM",
-        "mimetype": "image/png"
+        "tileMatrixSet": "PM"
     }
 }

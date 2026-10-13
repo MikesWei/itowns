@@ -8,7 +8,7 @@ iTowns V2 is licenced under both licences CeCILL-B Version 1.0 and MIT.
 
 iTowns is licensed under the CeCILL-B license, Version 1.0. You may obtain a copy of the License at
 
-http://www.cecill.info/licences/Licence_CeCILL-B_V1-en.html
+https://cecill.info/licences/Licence_CeCILL-B_V1-en.html
 
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
 
@@ -26,7 +26,6 @@ iTowns V2 includes the following third-party code.
 
 ### ThreeJS
 
-
 > Copyright (c) 2010-2015 three.js authors
 >  http://www.opensource.org/licenses/mit-license.php
 >
@@ -37,24 +36,6 @@ iTowns V2 includes the following third-party code.
 > The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 >
 > THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-### parallel.js
-
-Parallel.js is published under MIT ( https://github.com/adambom/parallel.js/blob/master/LICENSE )
-
-https://adambom.github.io/parallel.js/
-
-### ES6-Promise
-
-ES6-Promise is published under MIT.
-
-https://github.com/stefanpenner/es6-promise
-
-### JSZip
-
-JSZip is published under a dual MIT licence and GPLv3 licence. The MIT version is used here.
-
-https://stuk.github.io/jszip/
 
 ### PriorityQueue
 

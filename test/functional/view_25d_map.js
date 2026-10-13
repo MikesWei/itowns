@@ -1,0 +1,75 @@
+import assert from 'assert';
+
+describe('view_25d_map', function _() {
+    let result;
+    before(async () => {
+        await enableGLForTest();
+        result = await loadExample('examples/view_25d_map.html', this.fullTitle());
+    });
+
+    after(async () => {
+        disableGLForTest();
+    });
+
+    it('should run', async () => {
+        assert.ok(result);
+    });
+
+    it('should subdivise planar correctly', async () => {
+        // Test that there is a given number of "visible" tiles (i.e.
+        // `material.visible` property of a tile is set) for each tested level.
+        // Uses the property `view.tileLayer.info.displayed.tiles` of type
+        // InfoTiledGeometryLayer to retrieve such information
+        const displayedTiles = await page.evaluate(() => {
+            r = {};
+            [...view.tileLayer.info.displayed.tiles]
+                .forEach(t => (!r[t.level] ? r[t.level] = 1 : r[t.level]++));
+            return r;
+        });
+        assert.equal(displayedTiles['1'], 1);
+        assert.equal(displayedTiles['2'], 6);
+        assert.equal(displayedTiles['3'], 6);
+    });
+
+    it('should get picking position from depth', async function __() {
+        const length = 1500;
+
+        // get range with depth buffer and altitude
+        await page.evaluate((l) => {
+            const lookat = extent.center().toVector3();
+            view.camera3D.position.copy(lookat);
+            view.camera3D.position.z = l;
+            view.camera3D.lookAt(lookat);
+            view.notifyChange(view.camera3D, true);
+        }, length);
+
+        await waitUntilItownsIsIdle(this.test.fullTitle());
+
+        result = await page.evaluate(() => {
+            const depthMethod = view
+                .getPickingPositionFromDepth().distanceTo(view.camera3D.position);
+
+            const altitude = itowns.DEMUtils
+                .getElevationValueAt(view.tileLayer, extent.center().clone());
+
+            return { depthMethod, altitude };
+        });
+        // threorical range between ground and camera
+        const theoricalRange = length - result.altitude;
+        const diffRange = Math.abs(theoricalRange - result.depthMethod);
+        assert.ok(diffRange < 2);
+    });
+
+    it('should remove color Layer', async () => {
+        const colorLayersCountStart = await page.evaluate(() => view.getLayers(l => l.isColorLayer).length);
+        await page.evaluate(() => view.removeLayer('wms_imagery'));
+        const colorLayersCountEnd = await page.evaluate(() => view.getLayers(l => l.isColorLayer).length);
+        assert.ok(colorLayersCountStart - colorLayersCountEnd === 1);
+    });
+
+    it('should remove elevation Layers', async () => {
+        await page.evaluate(() => view.removeLayer('wms_elevation'));
+        const elevationLayersCount = await page.evaluate(() => view.getLayers(l => l.isElevationLayer).length);
+        assert.ok(elevationLayersCount === 0);
+    });
+});

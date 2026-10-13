@@ -1,0 +1,115 @@
+<html>
+    <head>
+        <title>Itowns - Globe + color layers from vector data</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "dat": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js",
+                "GuiTools": "./jsm/GUI/GuiTools.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+        </script>
+        <meta charset="UTF-8">
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body>
+        <div id="viewerDiv" class="viewer"></div>
+        <script type="module">
+
+            import GuiTools from 'GuiTools';
+            import setupLoadingScreen from 'LoadingScreen';
+            import * as THREE from 'three';
+            import * as itowns from 'itowns';
+            import * as debug from 'debug';
+
+            // # Simple Globe viewer
+            /* global itowns, setupLoadingScreen, GuiTools, ToolTip */
+
+            // Define initial camera position
+            var placement = {
+                coord: new itowns.Coordinates('EPSG:4326', 0.089, 42.8989),
+                range: 30000,
+                tilt: 20,
+                heading: -70,
+            }
+
+            // `viewerDiv` will contain iTowns' rendering area (`<canvas>`)
+            var viewerDiv = document.getElementById('viewerDiv');
+
+            // Instanciate iTowns GlobeView*
+            var view = new itowns.GlobeView(viewerDiv, placement);
+            var menuGlobe = new GuiTools('menuDiv', view);
+
+            setupLoadingScreen(viewerDiv, view);
+
+            // Add one imagery layer to the scene
+            // This layer is defined in a json file but it could be defined as a plain js
+            // object. See Layer* for more info.
+            itowns.Fetcher.json('./layers/JSONLayers/Ortho.json').then(function _(config) {
+                config.source = new itowns.WMTSSource(config.source);
+                var layer = new itowns.ColorLayer('Ortho', config);
+                view.addLayer(layer).then(function _() {
+                    menuGlobe.addLayerGUI.bind(menuGlobe);
+                    itowns.ColorLayersOrdering.moveLayerToIndex(view, 'Ortho', 0);
+                });
+            });
+            // Add two elevation layers.
+            // These will deform iTowns globe geometry to represent terrain elevation.
+            function addElevationLayerFromConfig(config) {
+                config.source = new itowns.WMTSSource(config.source);
+                var layer = new itowns.ElevationLayer(config.id, config);
+                view.addLayer(layer).then(menuGlobe.addLayerGUI.bind(menuGlobe));
+            }
+            itowns.Fetcher.json('./layers/JSONLayers/IGN_MNT_HIGHRES.json').then(addElevationLayerFromConfig);
+            itowns.Fetcher.json('./layers/JSONLayers/WORLD_DTM.json').then(addElevationLayerFromConfig);
+
+
+            const gpxSource = new itowns.FileSource({
+                url: 'https://raw.githubusercontent.com/iTowns/iTowns2-sample-data/master/ULTRA2009.gpx',
+                crs: 'EPSG:4326',
+                format: 'application/gpx',
+            });
+
+            const gpxStyle = {
+                zoom: { min: 9 },
+                stroke: { color: 'red' },
+                point: {
+                    color: 'white',
+                    line: 'red',
+                },
+                text: {
+                    field: '{name}',
+                    transform: 'uppercase',
+                    font: ['Arial', 'sans-serif'],
+                    haloColor: 'white',
+                    haloWidth: 1,
+                },
+            };
+
+            const gpxLayer = new itowns.ColorLayer('Gpx', {
+                source: gpxSource,
+                style: gpxStyle,
+                addLabelLayer: true,
+            });
+
+            view.addLayer(gpxLayer);
+
+
+            debug.createTileDebugUI(menuGlobe.gui, view);
+            window.view = view;
+            window.itowns = itowns;
+            window.THREE = THREE;
+
+        </script>
+    </body>
+</html>

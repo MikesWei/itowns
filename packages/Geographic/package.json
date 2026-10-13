@@ -1,0 +1,41 @@
+{
+  "name": "@itowns/geographic",
+  "version": "2.46.0",
+  "description": "Proj4-based three.js geodesy toolkit",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    "types": "./lib/index.d.ts",
+    "default": "./lib/index.js"
+  },
+  "types": "./lib/index.d.ts",
+  "scripts": {
+    "build": "",
+    "transpile": "tsc && cross-env BABEL_DISABLE_CACHE=1 babel src --out-dir lib --extensions .js,.ts",
+    "test-unit": "npm run base-test-unit test/unit",
+    "base-test-unit": "cross-env BABEL_DISABLE_CACHE=1 NODE_OPTIONS=--no-experimental-strip-types mocha --import=../../config/babel-register/register.mjs",
+    "test-with-coverage": "c8 -n src -r html cross-env npm run test-unit",
+    "test-with-coverage_lcov": "c8 -n src --reporter=lcov cross-env npm run test-unit",
+    "watch": "npm run transpile -- --watch",
+    "publish-latest": "npm publish --access public --tag=latest --provenance",
+    "publish-next": "npm publish --access public --tag=next --provenance"
+  },
+  "files": [
+    "*.md",
+    "src",
+    "lib"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iTowns/itowns.git"
+  },
+  "license": "(CECILL-B OR MIT)",
+  "bugs": {
+    "url": "https://github.com/itowns/itowns/issues"
+  },
+  "peerDependencies": {
+    "proj4": ">=2.20.0",
+    "three": ">=0.182.0"
+  },
+  "homepage": "https://itowns.github.io/"
+}

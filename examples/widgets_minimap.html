@@ -1,0 +1,141 @@
+<html>
+    <head>
+        <title>Itowns - Minimap widget</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "dat": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js",
+                "GuiTools": "./jsm/GUI/GuiTools.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+        </script>
+
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+        <!-- Import stylesheet for itowns Widgets plugin. This stylesheet is included in the bundles if you downloaded
+        them, or it can be found in `node_modules/itowns/examples/css` if you installed iTowns with npm. Otherwise, it
+        can be found here : https://raw.githubusercontent.com/iTowns/itowns/master/examples/css/widgets.css -->
+        <link rel="stylesheet" type="text/css" href="css/widgets.css">
+
+    </head>
+    <body>
+        <!-- Add a description -->
+        <div id="description">
+            Double click on the minimap to travel to the cursor location.
+        </div>
+
+        <!-- Create a container for itowns viewer -->
+        <div id="viewerDiv"></div>
+
+
+
+        <script type="module">
+
+            import GuiTools from 'GuiTools';
+            import setupLoadingScreen from 'LoadingScreen';
+            import * as THREE from 'three';
+            import * as itowns from 'itowns';
+            import * as debug from 'debug';
+            import * as itowns_widgets from 'itowns_widgets';
+
+
+
+            // ---------- CREATE A GlobeView FOR SUPPORTING DATA VISUALIZATION : ----------
+
+            // Define camera initial position
+            const placement = {
+                coord: new itowns.Coordinates('EPSG:4326', 2.351323, 48.856712),
+                range: 6000,
+                tilt: 50,
+            }
+
+            // `viewerDiv` contains iTowns' rendering area (`<canvas>`)
+            const viewerDiv = document.getElementById('viewerDiv');
+
+            // Create a GlobeView
+            const view = new itowns.GlobeView(viewerDiv, placement);
+
+            // Setup loading screen and debug menu
+            setupLoadingScreen(viewerDiv, view);
+            const debugMenu = new GuiTools('menuDiv', view);
+
+
+
+            // ---------- DISPLAY CONTEXTUAL DATA : ----------
+
+            // Add one imagery layer to the scene. This layer's properties are defined in a json file, but it could be
+            // defined as a plain js object. See `Layer` documentation for more info.
+            itowns.Fetcher.json('layers/JSONLayers/Ortho.json').then((config) => {
+                config.source = new itowns.WMTSSource(config.source);
+                view.addLayer(
+                    new itowns.ColorLayer(config.id, config),
+                ).then(debugMenu.addLayerGUI.bind(debugMenu));
+            });
+
+            // Add two elevation layers, each with a different level of detail. Here again, each layer's properties are
+            // defined in a json file.
+            function addElevationLayerFromConfig(config) {
+                config.source = new itowns.WMTSSource(config.source);
+                view.addLayer(
+                    new itowns.ElevationLayer(config.id, config),
+                ).then(debugMenu.addLayerGUI.bind(debugMenu));
+            }
+            itowns.Fetcher.json('layers/JSONLayers/IGN_MNT_HIGHRES.json').then(addElevationLayerFromConfig);
+            itowns.Fetcher.json('layers/JSONLayers/WORLD_DTM.json').then(addElevationLayerFromConfig);
+
+
+
+            // ---------- ADD MINIMAP WIDGET : ----------
+
+            // Create a ColorLayer that shall be displayed on the minimap.
+            const minimapColorLayer = new itowns.ColorLayer('minimap', {
+                source: new itowns.VectorTilesSource({
+                    style: "https://data.geopf.fr/annexes/ressources/vectorTiles/styles/PLAN.IGN/standard.json",
+                    // We don't display mountains and plot related data to ease visualisation
+                    filter: (layer) => !layer['source-layer'].includes('oro_')
+                        && !layer['source-layer'].includes('parcellaire'),
+                }),
+                addLabelLayer: { performance: true },
+            });
+
+            // Create a minimap.
+            const minimap = new itowns_widgets.Minimap(view, minimapColorLayer, {
+                cursor: '+',
+                size: 200,
+            });
+
+
+
+            // ---------- ADD INTERACTION WITH MINIMAP : ----------
+
+            // When double-clicking the minimap, travel to the cursor location.
+            const cursorCoordinates = new itowns.Coordinates(minimap.view.referenceCrs);
+            minimap.domElement.addEventListener('dblclick', (event) => {
+                minimap.view.pickTerrainCoordinates(event, cursorCoordinates);
+                view.controls.lookAtCoordinate({ coord: cursorCoordinates });
+            });
+
+
+
+            // ---------- DEBUG TOOLS : ----------
+
+            debug.createTileDebugUI(debugMenu.gui, view);
+
+            window.view = view;
+            window.itowns = itowns;
+            window.THREE = THREE;
+
+        </script>
+    </body>
+</html>

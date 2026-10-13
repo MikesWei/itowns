@@ -1,0 +1,152 @@
+<html>
+    <head>
+        <title>iTowns - Entwine simple loader</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/",
+                "lil": "https://unpkg.com/lil-gui@0.20.0/dist/lil-gui.esm.js"
+            }
+        }
+        </script>
+        <meta charset="UTF-8">
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+        <style type="text/css">
+            #description {
+                z-index: 2;
+                left: 10px;
+            }
+        </style>
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body>
+        <div id="description">Specify the URL of a Entwine Point Tree to load:
+            <input type="text" id="loadUrl" />
+            <button id="loadUrlBtn">Load</button>
+            <button id="loadLyonBtn">Load the Grand Lyon dataset</button>
+            <div id="share"></div>
+        </div>
+        <div id="viewerDiv"></div>
+
+        <script type="module">
+
+            import lil from 'lil';
+            import setupLoadingScreen from 'LoadingScreen';
+            import * as THREE from 'three';
+            import * as itowns from 'itowns';
+            import * as debug from 'debug';
+            import * as itowns_widgets from 'itowns_widgets';
+            import { zoomToLayer } from './jsm/PointCloudHelper.js';
+            import {getShareableURL} from './jsm/ExampleUtils.js';
+
+            itowns.CRS.defs('EPSG:3946', '+proj=lcc +lat_0=46 +lon_0=3 +lat_1=45.25 +lat_2=46.75 +x_0=1700000 +y_0=5200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs');
+
+            var debugGui = new lil();
+            var viewerDiv = document.getElementById('viewerDiv');
+            viewerDiv.style.display = 'block';
+
+            var eptLayer;
+
+            const view = new itowns.View('EPSG:4326', viewerDiv);
+            const controls = new itowns.PlanarControls(view);
+            view.mainLoop.gfxEngine.renderer.setClearColor(0xdddddd);
+
+            view.domElement.addEventListener('dblclick', dblClickHandler);
+
+            // Check if an url had been given as an argument
+            // and parse to get url and options.
+            const uri = new URL(location.href);
+            const urlParams = uri.searchParams;
+            let url = urlParams.get('ept');
+            urlParams.delete('ept');
+
+            const options = {};
+            for (const [k, v] of urlParams) {
+                options[k] = isNaN(parseFloat(v, 10)) ? v : parseFloat(v, 10);
+            }
+
+            loadEPT(url, options);
+
+            function dblClickHandler(event) {
+                var pick = view.pickObjectsAt(event, 5, eptLayer);
+
+                for (const p of pick) {
+                    console.info('Selected point #' + p.index + ' in position (' +
+                        p.object.position.x + ', ' +
+                        p.object.position.y + ', ' +
+                        p.object.position.z +
+                        ') - node ' + p.object.userData.node.id);
+                }
+            }
+
+            function changeViewCrs(crs) {
+                view.referenceCrs = crs;
+                view.camera.crs = crs;
+            }
+
+            function onLayerReady() {
+                zoomToLayer(view, eptLayer);
+
+                // add GUI
+                debug.PointCloudDebug.initTools(view, eptLayer, debugGui)
+            }
+
+            let eptName
+            function loadEPT(url, options) {
+                if(!url) return;
+
+                // Share the view
+                document.getElementById('share').innerHTML = `<a href="${getShareableURL(url, "ept")}" target="_blank">Link to share this view</a>`;
+
+
+                const eptSource = new itowns.EntwinePointTileSource({ url });
+
+                const config = {
+                    source: eptSource,
+                    ...options,
+                };
+
+                eptSource.whenReady.then(() => {
+                    changeViewCrs(eptSource.crs);
+                    if (eptLayer) {
+                        eptLayer.debugUI.destroy();
+                        console.log(eptName)
+                        view.removeLayer(eptName, true);
+                    }
+
+                    if(url.slice(-1) === '/') url = url.slice(0, -1);
+
+                    eptName = url.split('/').pop()
+                    eptName = eptName[0].toUpperCase() + eptName.slice(1);
+                    eptLayer = new itowns.EntwinePointTileLayer(eptName, config);
+                    view.addLayer(eptLayer).then(onLayerReady);
+
+                })
+            }
+
+            const loadUrlBtn = document.getElementById('loadUrlBtn');
+            loadUrlBtn.addEventListener('click', () => {
+                url = document.getElementById('loadUrl').value;
+                if (url) { loadEPT(url); }
+            });
+
+            const loadLyonBtn = document.getElementById('loadLyonBtn');
+            loadLyonBtn.addEventListener('click', () => {
+                url = 'https://download.data.grandlyon.com/files/grandlyon/imagerie/mnt2018/lidar/ept/';
+                loadEPT(url);
+            });
+
+            window.itowns = itowns;
+            window.THREE = THREE;
+        </script>
+    </body>
+</html>

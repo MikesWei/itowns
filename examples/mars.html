@@ -1,0 +1,117 @@
+<html>
+    <head>
+        <title>Itowns - Mars</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "dat": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js",
+                "GuiTools": "./jsm/GUI/GuiTools.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+        </script>
+
+        <meta charset="UTF-8">
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body>
+        <div id="viewerDiv"></div>
+
+        <script type="module">
+
+            import GuiTools from 'GuiTools';
+            import setupLoadingScreen from 'LoadingScreen';
+            import * as THREE from 'three';
+            import * as itowns from 'itowns';
+            import * as debug from 'debug';
+
+            const marsRealisticParams = {
+                rayleighScattering: new THREE.Vector3(0.00199, 0.00092, 0.00045),
+                mieScattering: new THREE.Vector3(0.003, 0.002, 0.0015),
+                mieExtinction: new THREE.Vector3(0.0033, 0.0022, 0.00165),
+                miePhaseFunctionG: 0.7,
+            };
+
+            const marsSimpleParams = {
+                skyAltitude: 100000, // Closer to ground
+                skyColor: 0xd99b75, // Orange sky
+                fogColor: 0xd6ad9a, // Beige fog
+            }
+
+            import * as itowns_widgets from 'itowns_widgets';
+            // # Simple Globe viewer
+            // Define initial camera position
+            // mars crs projection is EPSG:104905
+            // Globe view could be use only 4326 and 3857
+            // For the moment, the example uses earth to visualize Mars WMTS.
+            // We keep 'EPSG:104905' in comment for the moment
+            itowns.CRS.defs('EPSG:104905', '+proj=longlat +a=3396190 +rf=169.894447223612 +no_defs +type=crs');
+            var placement = {
+                coord: new itowns.Coordinates('EPSG:4326', 77.6, 18.2),
+                range: 25000000,
+            }
+
+            // `viewerDiv` will contain iTowns' rendering area (`<canvas>`)
+            var viewerDiv = document.getElementById('viewerDiv');
+
+            // Instanciate iTowns GlobeView*
+            var view = new itowns.GlobeView(viewerDiv, placement, {
+                realisticSky: marsRealisticParams,
+                simpleSky: marsSimpleParams,
+                realisticLighting: true,
+                farFactor: 0.6, // Less aggressive horizon scaling for this ellipsoid-based demo
+            });
+
+            view.skyController.realisticSky.sky.material.moon = false;
+            setupLoadingScreen(viewerDiv, view);
+
+            // Add a tms imagery source
+            var tmsMarsSource = new itowns.TMSSource({
+                    // crs: 'EPSG:104905',
+                    crs: 'EPSG:4326',
+                    url: 'https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0/default/default028mm/{z}/{y}/{x}.jpg',
+                    // url : 'https://api.nasa.gov/mars-wmts/catalog/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0//default/default028mm/{z}/${y}/{x}.jpg',
+                    zoom: { min: 0, max: 9 },
+                })
+
+            // Add a imagery layer
+            var tmsMarsLayer = new itowns.ColorLayer('wms_imagery', {
+                source: tmsMarsSource,
+            });
+
+            view.addLayer(tmsMarsLayer);
+
+            const demMars = new itowns.ElevationLayer('demMars', {
+                useColorTextureElevation: true,
+                colorTextureElevationMinZ: 0,
+                colorTextureElevationMaxZ: 20000,
+                crs: 'EPSG:4326',
+                source: new itowns.TMSSource({
+                    // crs: 'EPSG:104905',
+                    crs: 'EPSG:4326',
+                    url : 'https://api.nasa.gov/mars-wmts/catalog/Mars_MGS_MOLA_DEM_mosaic_global_463m_8/1.0.0//default/default028mm/{z}/{y}/{x}.png',
+                    zoom: { min: 0, max: 5 },
+                }),
+            });
+            // view.addLayer(demMars);
+
+            var menuGlobe = new GuiTools('menuDiv', view);
+
+            debug.createRealisticLightingDebugUI(menuGlobe.gui, view);
+            debug.createTileDebugUI(menuGlobe.gui, view);
+            window.view = view;
+            window.itowns = itowns;
+            window.THREE = THREE;
+
+        </script>
+    </body>
+</html>

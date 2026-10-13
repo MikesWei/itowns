@@ -1,0 +1,204 @@
+import * as THREE from 'three';
+import { Vector3, Box3 } from 'three';
+import OBB from 'Renderer/OBB';
+
+const size = new Vector3();
+const position = new Vector3();
+const translation = new Vector3();
+
+const box3 = new Box3();
+
+export interface PointCloudSource {
+    spacing: number;
+    crs: string;
+    zmin: number;
+    zmax: number;
+    fetcher: (url: string, options?: RequestInit) => Promise<ArrayBuffer>;
+    parser: (data: ArrayBuffer, options: { in: PointCloudNode }) => THREE.BufferGeometry;
+    networkOptions: RequestInit;
+}
+
+export function buildVoxelKey(depth: number, x: number, y: number, z: number): string {
+    return `${depth}-${x}-${y}-${z}`;
+}
+
+abstract class PointCloudNode extends THREE.EventDispatcher {
+    /** The crs of the node. */
+    abstract crs: string;
+    /** Data source of the node. */
+    abstract source: PointCloudSource;
+
+    depth: number;
+    /**
+     * The number of points in this node.
+     * '-1' is the node has been loaded yet
+     */
+    numPoints: number;
+
+    /** The children nodes of this node. */
+    children: this[];
+    parent: this | undefined;
+
+    /** The node cubique obb. */
+    voxelOBB: OBB;
+    /** The cubique obb clamped to zmin and zmax. */
+    clampOBB: OBB;
+
+    /** Property used internally by PointCloud layer. */
+    visible: boolean;
+
+    /** The sse of the node set at an nitial value of -1. */
+    sse: number;
+    notVisibleSince: number | undefined;
+    promise: Promise<unknown> | null;
+    obj: THREE.Points & { matrixWorldInverse?: THREE.Matrix4 } | undefined;
+
+    abstract url: string;
+
+    abstract x: number;
+    abstract y: number;
+    abstract z: number;
+
+    /**
+     * The string id of the node, constituted of the four
+     * components: `depth-x-y-z`.
+     */
+    abstract voxelKey: string;
+
+    private _childrenCreated: boolean;
+
+    constructor(depth: number, numPoints = -1) {
+        super();
+
+        this.depth = depth;
+        this.numPoints = numPoints;
+
+        this.children = [];
+        this.parent = undefined;
+
+        this.voxelOBB = new OBB();
+        this.clampOBB = new OBB();
+        this.sse = -1;
+
+        this.visible = false;
+        this.promise = null;
+
+        this._childrenCreated = false;
+    }
+
+    abstract get networkOptions(): RequestInit;
+
+    abstract fetcher(url: string, networkOptions:  RequestInit): Promise<ArrayBuffer>;
+    abstract loadHierarchy(): Promise<unknown>;
+    abstract findAndCreateChild(depth: number, x: number, y: number, z: number): void;
+
+    get pointSpacing(): number {
+        return this.source.spacing / 2 ** this.depth;
+    }
+
+    get hierarchyIsLoaded(): boolean {
+        return this.numPoints >= 0;
+    }
+
+    get id(): string {
+        // VPC: we will have duplicates between all sources
+        return this.voxelKey;
+    }
+
+    async load(): Promise<THREE.BufferGeometry> {
+        if (!this._childrenCreated) {
+            await this.createChildren();
+        }
+        return this.fetcher(this.url, this.networkOptions)
+            .then(file => this.source.parser(file, {
+                in: this,
+            }));
+    }
+
+    async createChildren(): Promise<void> {
+        await this.loadHierarchy();
+
+        const depth = this.depth + 1;
+        const x = this.x * 2;
+        const y = this.y * 2;
+        const z = this.z * 2;
+
+        // Order follows ascending Potree child index (4*dx + 2*dy + dz),
+        // i.e. 0→7, so that node.children is always in Potree index order.
+        // This is required by the visibility texture encoding used for
+        // adaptive point-size rendering in the shader.
+        this.findAndCreateChild(depth, x,     y,     z);      // 0
+        this.findAndCreateChild(depth, x,     y,     z + 1);  // 1
+        this.findAndCreateChild(depth, x,     y + 1, z);      // 2
+        this.findAndCreateChild(depth, x,     y + 1, z + 1);  // 3
+        this.findAndCreateChild(depth, x + 1, y,     z);      // 4
+        this.findAndCreateChild(depth, x + 1, y,     z + 1);  // 5
+        this.findAndCreateChild(depth, x + 1, y + 1, z);      // 6
+        this.findAndCreateChild(depth, x + 1, y + 1, z + 1);  // 7
+        this._childrenCreated = true;
+    }
+
+    add(node: this): void {
+        this.children.push(node);
+        node.parent = this;
+        node.setOBBes();
+    }
+
+    // Compute the voxelOBB and the clampOBB for this node
+    setOBBes(): void {
+        // set the voxelOBB
+        const childVoxelBBox = this.computeBBoxFromParent();
+        this.voxelOBB.setFromBox3(childVoxelBBox).projOBB(this.source.crs, this.crs);
+
+        // get the clamped bbox from the voxel bbox
+        this.clampOBB.copy(this.voxelOBB)
+            .clampZ(this.source.zmin, this.source.zmax);
+    }
+
+    computeBBoxFromParent(): Box3 {
+        const parent = this.parent as this;
+
+        // initialize the child node obb
+        const voxelBBox = parent.voxelOBB.natBox;
+        const childVoxelBBox = box3.copy(voxelBBox);
+
+        // factor to apply, based on the depth difference (can be > 1)
+        const f = 2 ** (this.depth - parent.depth);
+
+        // size of the child node bbox (Vector3), based on the size of the
+        // parent node, and divided by the factor
+        voxelBBox.getSize(size).divideScalar(f);
+
+        // position of the parent node, if it was at the same depth as the
+        // child, found by multiplying the tree position by the factor
+        position.copy(parent).multiplyScalar(f);
+
+        // difference in position between the two nodes, at child depth, and
+        // scale it using the size
+        translation.subVectors(this, position).multiply(size);
+
+        // apply the translation to the child node bbox
+        childVoxelBBox.min.add(translation);
+
+        // use the size computed above to set the max
+        childVoxelBBox.max.copy(childVoxelBBox.min).add(size);
+
+        return childVoxelBBox;
+    }
+
+    findCommonAncestor(node: this): this | undefined {
+        if (node.depth == this.depth) {
+            if (node.id == this.id) {
+                return node;
+            } else if (node.depth != 0) {
+                return (this.parent as this).findCommonAncestor(node.parent as this);
+            }
+        } else if (node.depth < this.depth) {
+            return (this.parent as this).findCommonAncestor(node);
+        } else {
+            return this.findCommonAncestor(node.parent as this);
+        }
+    }
+}
+
+export default PointCloudNode;

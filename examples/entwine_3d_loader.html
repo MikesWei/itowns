@@ -1,0 +1,138 @@
+<html>
+    <head>
+        <title>iTowns - Entwine 3D loader</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "lil": "https://unpkg.com/lil-gui@0.20.0/dist/lil-gui.esm.js",
+                "GuiTools": "./jsm/GUI/GuiTools.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/",
+                "dat": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js"
+            }
+        }
+        </script>
+
+        <meta charset="UTF-8">
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+        <style type="text/css">
+            #description {
+                z-index: 2;
+                left: 10px;
+            }
+        </style>
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body>
+        <div id="description">Specify the URL of a Entwine Point Tree to load:
+            <input type="text" id="loadUrl" />
+            <button id='loadUrlBtn'>Load</button>
+            <button id="loadLyonBtn">Load "Grand Lyon" dataset</button>
+            <div id="share"></div>
+        </div>
+        <div id="viewerDiv"></div>
+
+        <script type="module">
+
+            // TODO rempa click
+            import lil from 'lil';
+            import GuiTools from 'GuiTools';
+            import setupLoadingScreen from 'LoadingScreen';
+            import * as THREE from 'three';
+            import * as itowns from 'itowns';
+            import * as debug from 'debug';
+            import * as itowns_widgets from 'itowns_widgets';
+            import { zoomToLayerGlobe } from './jsm/PointCloudHelper.js';
+            import {getShareableURL} from './jsm/ExampleUtils.js';
+
+            var debugGui = new lil();
+            var viewerDiv = document.getElementById('viewerDiv');
+
+            var view = new itowns.GlobeView(viewerDiv);
+
+            // Add one imagery layer to the scene and the miniView
+            // This layer is defined in a json file but it could be defined as a plain js
+            // object. See Layer* for more info.
+            itowns.Fetcher.json('./layers/JSONLayers/Ortho.json').then(function _(config) {
+                config.source = new itowns.WMTSSource(config.source);
+                var layer = new itowns.ColorLayer('Ortho', config);
+                view.addLayer(layer);
+            });
+
+            // Add two elevation layers.
+            // These will deform iTowns globe geometry to represent terrain elevation.
+            function addElevationLayerFromConfig(config) {
+                config.source = new itowns.WMTSSource(config.source);
+                var layer = new itowns.ElevationLayer(config.id, config);
+                view.addLayer(layer);
+            }
+            itowns.Fetcher.json('./layers/JSONLayers/IGN_MNT_HIGHRES.json').then(addElevationLayerFromConfig);
+            itowns.Fetcher.json('./layers/JSONLayers/WORLD_DTM.json').then(addElevationLayerFromConfig);
+
+            // Check if an url had been given as an argument
+            // and parse to get url and options.
+            const urlParams = new URL(location).searchParams;
+            let url = urlParams.get('ept');
+            urlParams.delete('ept');
+
+            const options = {};
+            for (const [k, v] of urlParams) {
+                options[k] = isNaN(parseFloat(v, 10)) ? v : parseFloat(v, 10);
+            }
+
+            loadEPT(url, options);
+
+            var eptLayer;
+            function onLayerReady() {
+                zoomToLayerGlobe(view, eptLayer);
+                debug.PointCloudDebug.initTools(view, eptLayer, debugGui);
+            }
+
+            function loadEPT(url, options) {
+                if(!url) return;
+                document.getElementById('share').innerHTML = `<a href="${getShareableURL(url, "ept")}" target="_blank">Link to share this view</a>`;
+
+
+                const eptSource = new itowns.EntwinePointTileSource({ url });
+
+                if (eptLayer) {
+                    eptLayer.debugUI.destroy();
+                    view.removeLayer('Entwine Point Tile');
+                    view.notifyChange();
+                    eptLayer.delete();
+                }
+
+                const config = {
+                    source: eptSource,
+                    crs: view.referenceCrs,
+                    ...options,
+                };
+
+                eptLayer = new itowns.EntwinePointTileLayer('Entwine Point Tile', config);
+
+                itowns.View.prototype.addLayer.call(view, eptLayer).then(onLayerReady);
+            }
+
+            const loadUrlBtn = document.getElementById('loadUrlBtn');
+            loadUrlBtn.addEventListener('click', () => {
+                url = document.getElementById('loadUrl').value;
+                loadEPT(url);
+            });
+
+            const loadLyonBtn = document.getElementById('loadLyonBtn');
+            loadLyonBtn.addEventListener('click', () => {
+                url = 'https://download.data.grandlyon.com/files/grandlyon/imagerie/mnt2018/lidar/ept/';
+                loadEPT(url);
+            });
+
+        </script>
+    </body>
+</html>

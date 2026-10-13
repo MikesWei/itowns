@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>iTowns - Potree simple loader</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/",
+                "lil": "https://unpkg.com/lil-gui@0.19.2/dist/lil-gui.esm.min.js"
+            }
+        }
+        </script>
+
+        <style type="text/css">
+            #info {
+                color: #7ad7ff;
+                font-family: 'Open Sans', sans-serif;
+                position: absolute;
+                top: 0;
+                left: 0;
+                padding: 0.3rem;
+                background-color: #404040;
+                z-index: 1;
+            }
+            @media (max-width: 600px) {
+                #info,
+                .dg {
+                    display: none;
+                }
+            }
+        </style>
+
+        <meta charset="UTF-8">
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body>
+        <div id="viewerDiv">
+            <div id="info"></div>
+        </div>
+
+        <div>
+
+        <script type="module">
+
+                import lil from 'lil';
+                import setupLoadingScreen from 'LoadingScreen';
+                import * as THREE from 'three';
+                import * as itowns from 'itowns';
+                import * as debug from 'debug';
+                import * as itowns_widgets from 'itowns_widgets';
+                import { zoomToLayer } from './jsm/PointCloudHelper.js';
+
+                var potreeLayer;
+                var oldPostUpdate;
+                var viewerDiv;
+                var debugGui;
+                var view;
+                var controls;
+
+                /* OTHER available dataset
+                const name = 'eglise_saint_blaise_arles';
+                const url = 'https://raw.githubusercontent.com/gmaillet/dataset/master/';
+                const file = 'eglise_saint_blaise_arles.js';
+                const crs = 'EPSG:4978';
+                => Geocentric
+
+                Probleme de CORS if 'Allow CORS' plugin off
+                const url = 'https://cors-anywhere.herokuapp.com/https://viz.lib.vt.edu/thessaloniki/resources/pointclouds/thessaloniki';
+                const file = 'cloud.js';
+                const crs = 'EPSG:3857';
+                => crs unknown. Most probaly a projection centered on the center of acquisition... 
+                */
+
+                // itowns.CRS.defs("EPSG:25831","+proj=utm +zone=31 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs");
+                // const name = 'Sagrada Familia';
+                // const url = 'https://betaserver.icgc.cat/potree12/resources/pointclouds/templesagradafamilia/cloud.js';
+                // const crs = 'EPSG:25831';
+
+
+                // itowns.CRS.defs("EPSG:3947","+proj=lcc +lat_0=47 +lon_0=3 +lat_1=46.25 +lat_2=47.75 +x_0=1700000 +y_0=6200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs");
+                // const name = 'Orvault-Potree1_7-3947';
+                // const url = 'https://raw.githubusercontent.com/bloc-in-bloc/sample-datas/main/Orvault-Potree1_7-3947/cloud.js';
+                // const crs = 'EPSG:3947';
+
+                // const name = 'archeodev';
+                // const url = 'https://www.wild-lights.com/archeodev/Cotencher/pointclouds/index/cloud.js';
+                // const crs = 'EPSG:3857';// => crs unknown...
+
+
+                itowns.CRS.defs("EPSG:32755","+proj=utm +zone=55 +south +datum=WGS84 +units=m +no_defs +type=crs");
+                const name = 'Melbourne';
+                const url = 'https://raw.githubusercontent.com/masonproco/melbournePotree/f1a32efa243bd3c7a61f975e3c1155078ecf73d5/pointcloud/cloud.js';
+                const crs = 'EPSG:32755';
+
+
+                viewerDiv = document.getElementById('viewerDiv');
+                viewerDiv.style.display = 'block';
+
+                debugGui = new lil();
+
+                // TODO: do we really need to disable logarithmicDepthBuffer ?
+                view = new itowns.View(crs, viewerDiv);
+                setupLoadingScreen(viewerDiv, view);
+                view.mainLoop.gfxEngine.renderer.setClearColor(0xcccccc);
+
+                // Configure Point Cloud layer
+                const potreeSource = new itowns.PotreeSource({
+                    url,
+                    crs,
+                });
+
+                potreeLayer = new itowns.PotreeLayer(name, {
+                    source: potreeSource,
+                });
+
+                // point selection on double-click
+                function dblClickHandler(event) {
+                    var pick = view.pickObjectsAt(event, 5, potreeLayer);
+
+                    for (const p of pick) {
+                        console.info('Selected point #' + p.index + ' in position (' +
+                            p.object.position.x + ', ' +
+                            p.object.position.y + ', ' +
+                            p.object.position.z +
+                         ') in Points ' + p.object.layer.id);
+                    }
+                }
+                view.domElement.addEventListener('dblclick', dblClickHandler);
+
+                // add potreeLayer to scene
+                function onLayerReady() {
+                    zoomToLayer(view, potreeLayer);
+
+                    debug.PointCloudDebug.initTools(view, potreeLayer, debugGui);
+
+                    controls = new itowns.PlanarControls(view);
+                    controls.groundLevel = potreeLayer.minElevationRange;
+
+                    // update stats window
+                    var info = document.getElementById('info');
+                    view.addFrameRequester(itowns.MAIN_LOOP_EVENTS.AFTER_RENDER, () => {
+                        info.textContent = potreeLayer.displayedCount.toLocaleString() + ' points';
+                    });
+                }
+                window.view = view;
+                view.addLayer(potreeLayer).then(onLayerReady);
+                window.view = view;
+            window.itowns = itowns;
+            window.THREE = THREE;
+
+        </script>
+    </body>
+</html>
+

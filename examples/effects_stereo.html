@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Itowns - Stereo</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "dat": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js",
+                "GuiTools": "./jsm/GUI/GuiTools.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+        </script>
+
+        <meta charset="UTF-8">
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body>
+        <div id="viewerDiv">
+          <span id="divScaleWidget"> Scale </span>
+        </div>
+        </div>
+        <script type="module">
+
+            import GuiTools from 'GuiTools';
+            import setupLoadingScreen from 'LoadingScreen';
+            import * as THREE from 'three';
+            import * as itowns from 'itowns';
+            import * as debug from 'debug';
+            import * as itowns_widgets from 'itowns_widgets';
+            // Warning: For now, three is imported twice: in the itowns bundle
+            // and from the unpkg CDN.
+            import { AnaglyphEffect } from 'three/addons/effects/AnaglyphEffect.js';
+            import { ParallaxBarrierEffect } from 'three/addons/effects/ParallaxBarrierEffect.js';
+            import { StereoEffect } from 'three/addons/effects/StereoEffect.js';
+
+            // Define initial camera position
+            const placement = {
+                coord: new itowns.Coordinates('EPSG:4326', 2.351323, 48.856712),
+                range: 25000000,
+            }
+            const promises = [];
+            let effect;
+
+            // `viewerDiv` will contain iTowns' rendering area (`<canvas>`)
+            const viewerDiv = document.getElementById('viewerDiv');
+
+            // Instanciate iTowns GlobeView*
+            const view = new itowns.GlobeView(viewerDiv, placement);
+
+            // Eye separation value
+            let eyeSep = 0.064;
+
+            // Save StereoCamera update function
+            const fnUpdateStereoCamera = THREE.StereoCamera.prototype.update;
+
+            setupLoadingScreen(viewerDiv, view);
+
+            THREE.StereoCamera.prototype.update = function _update(camera) {
+                this.cameraL.far = camera.far;
+                this.cameraR.far = camera.far;
+                this.cameraL.layers = camera.layers;
+                this.cameraR.layers = camera.layers;
+                this.eyeSep = eyeSep;
+                fnUpdateStereoCamera.bind(this)(camera);
+            };
+
+
+            // Add one imagery layer to the scene
+            // This layer is defined in a json file but it could be defined as a plain js
+            // object. See Layer* for more info.
+            itowns.Fetcher.json('./layers/JSONLayers/Ortho.json').then(function _(config) {
+                const source = new itowns.WMTSSource(config.source);
+                const layer = new itowns.ColorLayer(config.id, { source });
+                view.addLayer(layer).then(menuGlobe.addLayerGUI.bind(menuGlobe));
+            });
+            // Add two elevation layers.
+            // These will deform iTowns globe geometry to represent terrain elevation.
+            function addElevationLayerFromConfig(config) {
+                config.source = new itowns.WMTSSource(config.source);
+                const layer = new itowns.ElevationLayer(config.id, config);
+                view.addLayer(layer).then(menuGlobe.addLayerGUI.bind(menuGlobe));
+            }
+            itowns.Fetcher.json('./layers/JSONLayers/IGN_MNT_HIGHRES.json').then(addElevationLayerFromConfig);
+            itowns.Fetcher.json('./layers/JSONLayers/WORLD_DTM.json').then(addElevationLayerFromConfig);
+
+            /* eslint-disable no-unused-vars */
+            function updateEyeSep(value) {
+                eyeSep = value;
+
+                if (!effect) return;
+
+                view.notifyChange();
+            }
+
+            function disableEffect() {
+                if (effect && effect.dispose) {
+                    effect.dispose();
+                }
+                const g = view.mainLoop.gfxEngine;
+                const size = g.getWindowSize();
+                effect = null;
+                view.render = null;
+                g.renderer.setViewport(0, 0, size.x, size.y);
+                view.notifyChange();
+            }
+
+            function enableEffect(_eff) {
+                let size;
+                const g = view.mainLoop.gfxEngine;
+                const r = g.renderer;
+
+                if (effect) {
+                    disableEffect();
+                }
+
+                effect = _eff;
+                size = view.mainLoop.gfxEngine.getWindowSize();
+                effect.setSize(size.x, size.y);
+
+                view.render = function render() {
+                    r.clear();
+                    effect.render(view.scene, view.camera3D);
+                };
+
+                view.notifyChange();
+            }
+
+            /**
+             * Activate an anaglyph effect to the view. With a pair of red/blue glasses, the
+             * user can see the scene in 3D. See https://en.wikipedia.org/wiki/Anaglyph_3D
+             * for more information about this effect.
+             */
+            function enableAnaglyph() {
+                let _eff;
+                if (effect instanceof AnaglyphEffect) return;
+                _eff = new AnaglyphEffect(view.mainLoop.gfxEngine.renderer, view.camera3D);
+                enableEffect(_eff);
+            }
+
+            /**
+             * Activate a parallax effect to the view. With a pair of polarized glasses, the
+             * user can see the scene in 3D. This effect works better on an adapted screen.
+             * See https://en.wikipedia.org/wiki/Polarized_3D_system for more information
+             * about this effect.
+             */
+            function enableParallax() {
+                let _eff;
+                if (effect instanceof ParallaxBarrierEffect) return;
+                _eff = new ParallaxBarrierEffect(view.mainLoop.gfxEngine.renderer, view.camera3D);
+                enableEffect(_eff);
+            }
+
+            /**
+             * Activate a stereo effect to the view.
+             */
+            function enableStereo() {
+                let _eff;
+                if (effect instanceof StereoEffect) return;
+                _eff = new StereoEffect(view.mainLoop.gfxEngine.renderer, view.camera3D);
+                enableEffect(_eff);
+            }
+
+            const menuGlobe = new GuiTools('menuDiv', view);
+            const divScaleWidget = document.getElementById('divScaleWidget');
+
+            const d = new debug.Debug(view, menuGlobe.gui);
+            debug.createTileDebugUI(menuGlobe.gui, view, view.tileLayer, d);
+
+            const stereoeffect = {
+                none: disableEffect,
+                anaglyph: enableAnaglyph,
+                parallax: enableParallax,
+                stereo: enableStereo,
+                eyeSep: 0.064,
+            };
+
+            const folder = menuGlobe.gui.addFolder('Stereo Effect');
+            folder.open();
+            folder.add(stereoeffect, 'none').name('disable effect');
+            folder.add(stereoeffect, 'anaglyph').name('enable Anaglyph effect');
+            folder.add(stereoeffect, 'parallax').name('enable Parallax effect');
+            folder.add(stereoeffect, 'stereo').name('enable Stereo effect');
+            const guiEyeSep = folder.add(stereoeffect, 'eyeSep', 0, 0.2).name('Eye separator');
+
+            guiEyeSep.onChange(updateEyeSep);
+
+            function updateScaleWidget() {
+                let value = view.getPixelsToMeters(200);
+                value = Math.floor(value);
+                const digit = Math.pow(10, value.toString().length - 1);
+                value = Math.round(value / digit) * digit;
+                const pix = view.getMetersToPixels(value);
+                let unit = 'm';
+                if (value >= 1000) {
+                    value /= 1000;
+                    unit = 'km';
+                }
+                divScaleWidget.innerHTML = `${value} ${unit}`;
+                divScaleWidget.style.width = `${pix}px`;
+            }
+
+            // Listen for globe full initialisation event
+            view.addEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, function () {
+                // eslint-disable-next-line no-console
+                console.info('Globe initialized');
+                updateScaleWidget();
+            });
+            view.controls.addEventListener(itowns.CONTROL_EVENTS.RANGE_CHANGED, () => {
+                updateScaleWidget();
+            });
+
+
+            // Warning: the following code is not part of this example, those
+            // variables are only exposed for internal functional test uses.
+            window.view = view;
+
+            window.view = view;
+            window.itowns = itowns;
+            window.THREE = THREE;
+
+        </script>
+    </body>
+</html>

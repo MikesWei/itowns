@@ -1,0 +1,160 @@
+import * as THREE from 'three';
+import { TileGeometry } from 'Core/TileGeometry';
+import { LRUCache } from 'lru-cache';
+import { computeBuffers } from 'Core/Prefab/computeBufferTileGeometry';
+import OBB from 'Renderer/OBB';
+import type { Extent } from '@itowns/geographic';
+import { Coordinates } from '@itowns/geographic';
+
+const cacheBuffer = new Map<string, {
+    index: THREE.BufferAttribute;
+    uv: THREE.BufferAttribute;
+}>();
+const cacheTile = new LRUCache<string, Promise<TileGeometry>>({ max: 500 });
+
+export interface GpuBufferAttributes {
+    index: THREE.BufferAttribute | null;
+    position: THREE.BufferAttribute;
+    normal: THREE.BufferAttribute;
+    uvs: THREE.BufferAttribute[];
+}
+
+/**
+ * Reference to a tile's extent with rigid transformations.
+ * Enables reuse of geometry, saving a bit of memory.
+ */
+export interface ShareableExtent {
+    shareableExtent: Extent;
+    quaternion: THREE.Quaternion;
+    position: THREE.Vector3;
+}
+
+export interface TileBuilderPrepareParams {
+    /** Whether to build the skirt. */
+    disableSkirt: boolean;
+    /** Whether to render the skirt. */
+    hideSkirt: boolean;
+    /** Number of segments (edge loops) inside tiles. */
+    segments: number;
+    /** Buffer for projected points. */
+    extent: Extent;
+    level: number;
+}
+
+export interface TileBuilderParams extends TileBuilderPrepareParams {
+    center: THREE.Vector3;
+    coordinates: Coordinates;
+}
+
+export interface TileBuilder<SpecializedParams extends TileBuilderParams = TileBuilderParams> {
+    crs: string;
+
+    /** Convert builder-agnostic params to specialized ones. */
+    prepare(params: TileBuilderPrepareParams): SpecializedParams;
+    /**
+     * Computes final offset of the second texture set.
+     * Only relevant in the case of more than one texture sets.
+     */
+    computeExtraOffset?(params: SpecializedParams): number;
+    /** Get the center of the current tile as a 3D vector. */
+    center(extent: Extent): THREE.Vector3;
+    /** Converts an x/y tile-space position to its equivalent in 3D space. */
+    vertexPosition(coordinates: Coordinates): THREE.Vector3;
+    /** Gets the geodesic normal of the last processed vertex. */
+    vertexNormal(): THREE.Vector3;
+    /** Project horizontal texture coordinate to world space. */
+    uProject(u: number, extent: Extent): number;
+    /** Project vertical texture coordinate to world space. */
+    vProject(v: number, extent: Extent): number;
+    /**
+     * Compute shareable extent to pool geometries together.
+     * The geometry of tiles on the same latitude is the same with an added
+     * rigid transform.
+     */
+    computeShareableExtent(extent: Extent): ShareableExtent;
+}
+
+type UintArray = Uint8Array | Uint16Array | Uint32Array;
+
+export function newTileGeometry(
+    builder: TileBuilder,
+    params: TileBuilderPrepareParams,
+) {
+    const { shareableExtent, quaternion, position } =
+        builder.computeShareableExtent(params.extent);
+
+    const south = shareableExtent.south.toFixed(6);
+
+    const bufferKey =
+        `${builder.crs}_${params.disableSkirt ? 0 : 1}_${params.segments}`;
+
+    const key = `s${south}l${params.level}bK${bufferKey}`;
+    let promiseGeometry = cacheTile.get(key);
+
+    // build geometry if doesn't exist
+    if (!promiseGeometry) {
+        let resolve: ((value: TileGeometry) => void) | undefined;
+        promiseGeometry = new Promise<TileGeometry>((r) => { resolve = r; });
+        cacheTile.set(key, promiseGeometry);
+
+        params.extent = shareableExtent;
+        const center = builder.center(params.extent).clone();
+        // Read previously cached values (index and uv.wgs84 only
+        // depend on the # of triangles)
+        let cachedBuffers = cacheBuffer.get(bufferKey);
+
+        let buffers;
+        try {
+            buffers = computeBuffers(
+                builder,
+                { ...params, center },
+                cachedBuffers !== undefined
+                    ? {
+                        index: cachedBuffers.index.array as UintArray,
+                        uv: cachedBuffers.uv.array as Float32Array,
+                    }
+                    : undefined,
+            );
+        } catch (e) {
+            return Promise.reject(e);
+        }
+
+        if (!cachedBuffers) {
+            // We know the fields will exist due to the condition
+            // matching with the one for buildIndexAndUv_0.
+            // TODO: Make this brain-based check compiler-based.
+
+            cachedBuffers = {
+                index: new THREE.BufferAttribute(buffers.index as UintArray, 1),
+                uv: new THREE.BufferAttribute(buffers.uvs[0] as Float32Array, 2),
+            };
+
+            // Update cacheBuffer
+            cacheBuffer.set(bufferKey, cachedBuffers);
+        }
+
+        const gpuBuffers: GpuBufferAttributes = {
+            index: cachedBuffers.index,
+            uvs: [
+                cachedBuffers.uv,
+                ...(buffers.uvs[1] !== undefined
+                    ? [new THREE.BufferAttribute(buffers.uvs[1], 1)]
+                    : []
+                ),
+            ],
+            position: new THREE.BufferAttribute(buffers.position, 3),
+            normal: new THREE.BufferAttribute(buffers.normal, 3),
+        };
+
+        const geometry = new TileGeometry(builder, params, gpuBuffers);
+        const bbox = geometry.boundingBox as THREE.Box3;
+        geometry.OBB = new OBB(bbox.min, bbox.max);
+        geometry.initRefCount(cacheTile, key);
+        (resolve as (value: TileGeometry) => void)(geometry);
+
+        return Promise.resolve({ geometry, quaternion, position });
+    }
+
+    return (promiseGeometry as Promise<TileGeometry>)
+        .then(geometry => ({ geometry, quaternion, position }));
+}

@@ -1,0 +1,150 @@
+<html>
+    <head>
+        <meta charset="UTF-8">
+
+        <title>Itowns - COPC simple loader</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "lil": "https://unpkg.com/lil-gui@0.20.0/dist/lil-gui.esm.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+        </script>
+
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+        <style>
+            #description {
+                z-index: 2;
+                left: 10px;
+            }
+        </style>
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body>
+        <div id="description">Specify the URL of a COPC file to load:
+            <input type="text" id="loadUrl" />
+            <button id="loadUrlBtn">Load</button>
+            <div>
+                <button id="loadAutzenBtn">Load Autzen Stadium (80mb)</button>
+                <button id="loadSofiBtn">Load SoFI Stadium (2.3gb)</button>
+                <button id="loadMillsiteBtn">Load Millsite (1.9gb)</button>
+            <div id="share"></div>
+            </div>
+        </div>
+        <div id="viewerDiv"></div>
+
+        <script type="module">
+            import lil from 'lil';
+            import setupLoadingScreen from 'LoadingScreen';
+            import * as THREE from 'three';
+            import * as itowns from 'itowns';
+            import * as debug from 'debug';
+            import * as itowns_widgets from 'itowns_widgets';
+            import { zoomToLayer } from './jsm/PointCloudHelper.js';
+            import {getShareableURL} from './jsm/ExampleUtils.js';
+
+            let layer; // COPCLayer
+
+            const viewerDiv = document.getElementById('viewerDiv');
+            const gui = new lil();
+
+            const view = new itowns.View('EPSG:4326', viewerDiv);
+            const controls = new itowns.PlanarControls(view);
+            view.mainLoop.gfxEngine.renderer.setClearColor(0xdddddd);
+
+            // Check if an url had been given as an argument
+            // and parse to get url and options.
+            const urlParams = new URL(location).searchParams;
+            let url = urlParams.get('copc');
+            urlParams.delete('copc');
+
+            const options = {};
+            for (const [k, v] of urlParams) {
+                options[k] = isNaN(parseFloat(v, 10)) ? v : parseFloat(v, 10);
+            }
+
+            loadCopc(url, options)
+
+            function changeViewCrs(crs) {
+                view.referenceCrs = crs;
+                view.camera.crs = crs;
+            }
+
+            function onLayerReady() {
+                zoomToLayer(view, layer);
+
+                // add GUI
+                debug.PointCloudDebug.initTools(view, layer, gui)
+            }
+
+            function loadCopc(url, options) {
+                if(!url) return;
+
+                // Share the view
+                document.getElementById('share').innerHTML = `<a href="${getShareableURL(url, "copc")}" target="_blank">Link to share this view</a>`;
+
+
+                const source = new itowns.CopcSource({ url });
+
+                const config = {
+                    source,
+                    sseThreshold: 2,
+                    pointBudget: 3000000,
+                    ...options,
+                };
+
+                source.whenReady.then(() => {
+                    changeViewCrs(source.crs);
+                    if (layer) {
+                        layer.debugUI.destroy();
+                        view.removeLayer('COPC', true);
+                    }
+                    layer = new itowns.CopcLayer('COPC', config);
+                    view.addLayer(layer).then(onLayerReady);
+                })
+            }
+
+            function loadAutzen() {
+                loadCopc("https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz");
+            }
+
+            function loadSofi() {
+                loadCopc("https://s3.amazonaws.com/hobu-lidar/sofi.copc.laz");
+            }
+
+            function loadMillsite() {
+                loadCopc("https://s3.amazonaws.com/data.entwine.io/millsite.copc.laz");
+            }
+
+            const loadAutzenBtn = document.getElementById('loadAutzenBtn');
+            const loadSofiBtn = document.getElementById('loadSofiBtn');
+            const loadMillsiteBtn = document.getElementById('loadMillsiteBtn');
+
+            loadAutzenBtn.addEventListener('click', loadAutzen);
+            loadSofiBtn.addEventListener('click', loadSofi);
+            loadMillsiteBtn.addEventListener('click', loadMillsite);
+
+            // window.view = view;
+            window.itowns = itowns;
+            window.THREE = THREE;
+
+            function load() {
+                const url = document.getElementById('loadUrl').value;
+                if (url) { loadCopc(url); }
+            }
+            const loadUrlBtn = document.getElementById('loadUrlBtn');
+            loadUrlBtn.addEventListener('click', load);
+
+        </script>
+    </body>
+</html>

@@ -1,0 +1,382 @@
+<html>
+    <head>
+        <title>Itowns - WFS (geojson) example</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "dat": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js",
+                "GuiTools": "./jsm/GUI/GuiTools.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+        </script>
+
+        <meta charset="UTF-8">
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body>
+        <div id="description">
+            <p>Key bindings</p>
+            <ul>
+              <li>Left-Click: camera translation (drag)</li>
+              <li>Right-Click: camera translation (pan)</li>
+              <li>Ctrl + Left-Click: camera rotation (orbit)</li>
+              <li>Spacebar / Wheel-Click: smart zoom</li>
+              <li>Mouse Wheel: zoom in/out</li>
+              <li>T: orient camera to a top view</li>
+              <li>Y: move camera to start position</li>
+            </ul>
+            <br />
+            <p><b>Information Batiment</b></p>
+            <ul id="info"></ul>
+        </div>
+        <div id="viewerDiv"></div>
+        <script type="module">
+
+            import GuiTools from 'GuiTools';
+            import setupLoadingScreen from 'LoadingScreen';
+            import * as THREE from 'three';
+            import * as itowns from 'itowns';
+            import * as debug from 'debug';
+            import * as itowns_widgets from 'itowns_widgets';
+            // Define crs projection that we will use (taken from https://epsg.io/3946, Proj4js section)
+            itowns.CRS.defs('EPSG:3946', '+proj=lcc +lat_1=45.25 +lat_2=46.75 +lat_0=46 +lon_0=3 +x_0=1700000 +y_0=5200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
+            /* global itowns,document, setupLoadingScreen, window */
+
+            var extent;
+            var viewerDiv;
+            var view;
+            var meshes;
+            var p;
+            var wmsImagerySource;
+            var wmsImageryLayer;
+            var rgb;
+            var lyonTclBusSource;
+            var color = new THREE.Color();
+
+            // Define geographic extent: CRS, min/max X, min/max Y
+            extent = new itowns.Extent(
+                'EPSG:3946',
+                1837816.94334, 1847692.32501,
+                5170036.4587, 5178412.82698);
+
+            // `viewerDiv` will contain iTowns' rendering area (`<canvas>`)
+            viewerDiv = document.getElementById('viewerDiv');
+
+            const centerMap = new itowns.Coordinates('EPSG:3946', 1840839, 5172718, 0);
+
+            // Instanciate PlanarView*
+            view = new itowns.PlanarView(viewerDiv, extent, {
+                placement: {
+                    coord: centerMap,
+                    heading: 45,
+                    range: 1800,
+                    tilt: 30,
+                }
+            });
+            setupLoadingScreen(viewerDiv, view);
+
+            wmsImagerySource = new itowns.WMSSource({
+                url: 'https://imagerie.data.grandlyon.com/wms/grandlyon',
+                networkOptions: { crossOrigin: 'anonymous' },
+                version: '1.3.0',
+                name: 'ortho_latest',
+                crs: 'EPSG:3946',
+                extent: extent,
+                format: 'image/jpeg',
+            });
+
+            // Add a WMS imagery layer
+            wmsImageryLayer = new itowns.ColorLayer('wms_imagery', {
+                transparent: false,
+                source: wmsImagerySource,
+            });
+
+            view.addLayer(wmsImageryLayer);
+
+            // Add a WMS elevation source
+            var wmsElevationSource = new itowns.WMSSource({
+                extent: extent,
+                url: 'https://imagerie.data.grandlyon.com/wms/grandlyon',
+                name: 'MNT2018_Altitude_2m',
+                crs: 'EPSG:3946',
+                width: 256,
+                format: 'image/jpeg',
+            });
+
+            // Add a WMS elevation layer
+            var wmsElevationLayer = new itowns.ElevationLayer('wms_elevation', {
+                useColorTextureElevation: true,
+                colorTextureElevationMinZ: 144,
+                colorTextureElevationMaxZ: 622,
+                source: wmsElevationSource,
+            });
+
+            view.addLayer(wmsElevationLayer);
+
+            var tile;
+            var linesBus = [];
+
+            function altitudeLine(properties, ctx) {
+                var result;
+                var z = 0;
+                if (ctx.coordinates) {
+                    result = itowns.DEMUtils.getTerrainObjectAt(view.tileLayer, ctx.coordinates, 0, tile);
+                    if (!result) {
+                        result = itowns.DEMUtils.getTerrainObjectAt(view.tileLayer, ctx.coordinates, 0);
+                    }
+                    if (result) {
+                        tile = [result.tile];
+                        z = result.coord.z;
+                    }
+                    return z + 5;
+                }
+            }
+
+            function acceptFeatureBus(properties) {
+                return properties.sens === "Aller";
+            }
+
+            lyonTclBusSource = new itowns.WFSSource({
+                url: "https://data.grandlyon.com/geoserver/sytral/ows?",
+                protocol: 'wfs',
+                version: '2.0.0',
+                id: 'tcl_bus',
+                typeName: "tcl_sytral.tcllignebus_2_0_0",
+                crs: 'EPSG:3946',
+                extent: {
+                    west: 1822174.60,
+                    east: 1868247.07,
+                    south: 5138876.75,
+                    north: 5205890.19,
+                },
+                format: 'application/json',
+            });
+
+            const colorsLine = new Map();
+
+            const colorLine = (properties) => {
+                const line = properties.ligne;
+                let color = colorsLine.get(line);
+                if (color === undefined) {
+                    color = new THREE.Color(0xffffff * Math.random());
+                    colorsLine.set(line, color);
+                }
+                return colorsLine.get(line);
+            }
+
+            var lyonTclBusLayer = new itowns.FeatureGeometryLayer('lyon_tcl_bus', {
+                filter: acceptFeatureBus,
+                source: lyonTclBusSource,
+                zoom: { min: 1 },
+
+                style: {
+                    stroke: {
+                        base_altitude: altitudeLine,
+                        color: colorLine,
+                        width: 5,
+                    }
+                }
+            });
+
+            const lyonBusStopSource = new itowns.WFSSource({
+                url: "https://data.grandlyon.com/geoserver/sytral/ows?",
+                protocol: 'wfs',
+                version: '2.0.0',
+                id: 'pool',
+                typeName: "sytral:tcl_sytral.tclarret",
+                crs: 'EPSG:3946',
+                extent,
+                format: 'application/json',
+            });
+
+            var lyonBusStopLayer = new itowns.FeatureGeometryLayer('lyon_tcl_bus_stop', {
+                source: lyonBusStopSource,
+                zoom: { min: 4 },
+                style: {
+                    point: {
+                        base_altitude: altitudeLine,
+                        color: 'DarkTurquoise',
+                        radius: 30,
+                    }
+                }
+            });
+
+            const orange = new THREE.Color(0xffa400);
+            const blue = new THREE.Color(0x47edff);
+            const black = new THREE.Color(0x000000);
+            const red = new THREE.Color(0xff0000);
+
+            function colorBuildings(properties, ctx) {
+                const distance = ctx.coordinates.planarDistanceTo(centerMap);
+                if (properties.usage_1 === 'Résidentiel') {
+                    color.set(0xFDFDFF);
+                } else if (properties.usage_1 === 'Annexe') {
+                    color.set(0xC6C5B9);
+                } else if (properties.usage_1 === 'Commercial et services') {
+                    color.set(0x62929E);
+                } else if (properties.usage_1 === 'Religieux') {
+                    color.set(0x393D3F);
+                } else if (properties.usage_1 === 'Sportif') {
+                    color.set(0x546A7B);
+                } else {
+                    color.set(0x555555);
+                }
+
+                if (distance < 300) {
+                    return blue;
+                } else if (distance < 350){
+                    return black;
+                } else if (distance < 1000){
+                    return color;
+                } else if (distance < 1050){
+                    return red;
+                }
+                return color.lerp(orange, Math.min(distance / 4000, 1.0));
+            }
+
+
+            function extrudeBuildings(properties) {
+                return properties.hauteur;
+            }
+
+            function altitudeBuildings(properties) {
+                return properties.altitude_minimale_sol;
+            }
+
+            function acceptFeature(properties) {
+                return !!properties.hauteur;
+            }
+
+            var wfsBuildingSource = new itowns.WFSSource({
+                url: 'https://data.geopf.fr/wfs/ows?',
+                version: '2.0.0',
+                typeName: 'BDTOPO_V3:batiment',
+                crs: 'EPSG:4326',
+                ipr: 'IGN',
+                format: 'application/json',
+                extent: {
+                    west: 4.568,
+                    east: 5.18,
+                    south: 45.437,
+                    north: 46.03,
+                },
+            });
+
+            var wfsBuildingLayer = new itowns.FeatureGeometryLayer('wfsBuilding', {
+                batchId: function (property, featureId) { return featureId; },
+                filter: acceptFeature,
+                crs: 'EPSG:3946',
+                source: wfsBuildingSource,
+                zoom: { min: 4 },
+
+                style: {
+                    fill: {
+                        color: colorBuildings,
+                        base_altitude: altitudeBuildings,
+                        extrusion_height: extrudeBuildings,
+                    }
+                }
+            });
+
+            view.addLayer(wfsBuildingLayer);
+
+            var wfsCartoSource = new itowns.WFSSource({
+                url: 'https://data.geopf.fr/wfs/ows?',
+                version: '2.0.0',
+                typeName: 'BDCARTO_V5:zone_d_habitation',
+                crs: 'EPSG:3946',
+                ipr: 'IGN',
+                format: 'application/json',
+            });
+
+            var wfsCartoStyle = {
+                zoom: { min: 0, max: 20 },
+                text: {
+                    field: '{toponyme}',
+                    color: (p) => {
+                        switch (p.nature) {
+                            case 'Quartier':
+                                return 'WhiteSmoke';
+                            case 'Château':
+                                return 'Cornsilk';
+                            case 'Lieu-dit habité':
+                            default:
+                                return 'white';
+                        }
+                    },
+                    transform: 'uppercase',
+                    size: (p) => {
+                        switch (p.nature) {
+                            case 'Quartier':
+                                return 13;
+                            case 'Château':
+                                return 11;
+                            case 'Lieu-dit habité':
+                            default:
+                                return 18;
+                        }
+                    },
+                    haloColor: 'rgba(20,20,20, 0.8)',
+                    haloWidth: 3,
+                },
+            };
+
+            var wfsCartoLayer = new itowns.LabelLayer('wfsCarto', {
+                source: wfsCartoSource,
+                style: wfsCartoStyle,
+            });
+
+            view.addLayer(wfsCartoLayer);
+
+            function picking(event) {
+                var htmlInfo = document.getElementById('info');
+                var intersects = view.pickObjectsAt(event, 2, 'wfsBuilding');
+                var properties;
+                var info;
+                var batchId;
+                htmlInfo.innerHTML = ' ';
+
+                if (intersects.length) {
+                    batchId = intersects[0].object.geometry.attributes.batchId.array[intersects[0].face.a];
+                    properties = intersects[0].object.feature.geometries[batchId].properties;
+                    Object.keys(properties).map(function (objectKey) {
+                        var value = properties[objectKey];
+                        if (value) {
+                            var key = objectKey.toString();
+                            if (key[0] !== '_' && key !== 'geometry_name') {
+                                info = value.toString();
+                                htmlInfo.innerHTML +='<li><b>' + key + ': </b>' + info + '</li>';
+                            }
+                        }
+                    });
+                    return properties;
+                }
+            }
+
+            // Wait for globe initialization since we are using the elevation
+            // layer to calculate the base altitude of both feature layers.
+            // See the function `altitudeLine` above.
+            view.addEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, function m() {
+                view.addLayer(lyonTclBusLayer);
+                view.addLayer(lyonBusStopLayer);
+            });
+
+            window.addEventListener('mousemove', picking, false);
+            window.view = view;
+            window.itowns = itowns;
+            window.THREE = THREE;
+            window.picking = picking;
+
+        </script>
+    </body>
+</html>

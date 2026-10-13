@@ -1,0 +1,243 @@
+<html>
+    <head>
+        <title>Itowns - 3D Tiles loader</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "dat": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+        </script>
+
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+        <style type="text/css">
+            #description {
+                z-index: 2;
+                left: 10px;
+            }
+
+            #featureInfoText {
+                font-size: small;
+            }
+
+            #description .marg {
+                margin: 10px;
+            }
+        </style>
+
+    </head>
+    <body>
+        <div id="viewerDiv"></div>
+        <div id="description">Specify the URL of a tileset to load:
+            <input type="text" id="url" />
+            <button id="readURLButton">Load</button>
+            <div class="marg">
+                <button id="loadLyonButton">Load Lyon 1 (Mesh)</button>
+                <button id="loadSeteButton">Load Sete (Point Cloud)</button>
+                <button id="loadLilleButton">Load Lille (Mesh)</button>
+                <div id="share"></div>
+            </div>
+            <hr />
+            <p id="featureInfoText" class="marg"><em>Display feature information by clicking on it</em></p>
+            <p><b>Feature Information:</b></p>
+            <div id="featureInfo" class="marg"></div>
+        </div>
+
+
+        <script type="module">
+            import * as THREE from 'three';
+            import dat from 'dat';
+            import setupLoadingScreen from 'LoadingScreen';
+            import * as itowns from 'itowns';
+            import * as debug from 'debug';
+
+            import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+            import {
+                zoomToLayer,
+                fillHTMLWithPickingInfo,
+            } from './jsm/OGC3DTilesHelper.js';
+
+            const {
+                TMSSource, WMTSSource, OGC3DTilesSource,
+                ColorLayer, ElevationLayer, OGC3DTilesLayer, PNTS_SIZE_MODE,
+                GlobeView, Coordinates, Fetcher,
+            } = itowns;
+
+            window.layer = null; // 3D Tiles layer
+
+            const uri = new URL(location);
+
+            const isEmbedded = window.self !== window.top;
+
+            window.gui = new dat.GUI();
+
+
+            // ---- Create a GlobeView ----
+
+            // Define camera initial position
+            const placement = {
+                coord: new Coordinates('EPSG:4326', 2.351323, 48.856712),
+                range: 12500000,
+            };
+
+            // `viewerDiv` will contain iTowns' rendering area (`<canvas>`)
+            const viewerDiv = document.getElementById('viewerDiv');
+
+            // Create a GlobeView
+            const view = new GlobeView(viewerDiv, placement, {
+                controls: {
+                    minDistance: 100,
+                }
+            });
+
+            // Enable various compression support for 3D Tiles tileset:
+            // - `KHR_draco_mesh_compression` mesh compression extension
+            // - `KHR_texture_basisu` texture compression extension
+            // - `EXT_meshopt_compression` data compression extension
+            itowns.enableDracoLoader('./libs/draco/');
+            itowns.enableKtx2Loader('./lib/basis/', view.renderer);
+            itowns.enableMeshoptDecoder(MeshoptDecoder);
+
+            // Setup loading screen
+            setupLoadingScreen(viewerDiv, view);
+
+            // ---- Add a basemap ----
+
+            // Add one imagery layer to the scene. This layer's properties are
+            // defined in a json file, but it cou   ld be defined as a plain js
+            // object. See `Layer` documentation for more info.
+            Fetcher.json('./layers/JSONLayers/OPENSM.json').then((config) => {
+                const colorLayer = new ColorLayer('Ortho', {
+                    ...config,
+                    source: new TMSSource(config.source),
+                });
+                view.addLayer(colorLayer);
+            });
+
+            // ---- Add 3D terrain ----
+
+            // Add two elevation layers: world terrain and a more precise terrain for france
+            // These will deform iTowns globe geometry to represent terrain elevation.
+            function addElevationLayerFromConfig(config) {
+                config.source = new itowns.WMTSSource(config.source);
+                var elevationLayer = new itowns.ElevationLayer(config.id, config);
+                view.addLayer(elevationLayer);
+            }
+            itowns.Fetcher.json('./layers/JSONLayers/IGN_MNT_HIGHRES.json').then(addElevationLayerFromConfig);
+            itowns.Fetcher.json('./layers/JSONLayers/WORLD_DTM.json').then(addElevationLayerFromConfig);
+
+            // ---------- 3D Tiles loading
+
+            function readURL() {
+                const url = document.getElementById('url').value;
+
+                if (url) {
+                    setUrl(url);
+                }
+            }
+
+            function setUrl(url) {
+                if (!url) return;
+
+                const input_url = document.getElementById('url');
+                if (!input_url) return;
+
+                uri.searchParams.set('3dtiles', url);
+
+                if (!isEmbedded){
+                    history.replaceState(null, null, `?${uri.searchParams.toString()}`);
+                }
+
+                input_url.value = url;
+                load(url);
+            }
+
+
+            function load(url) {
+                const source = new OGC3DTilesSource({ url });
+
+                if (window.layer) {
+                    gui.removeFolder('Layer 3DTiles');
+                    view.removeLayer('3DTiles');
+                    view.notifyChange();
+                    window.layer.delete();
+                }
+
+                window.layer = new OGC3DTilesLayer('3DTiles', {
+                    source,
+                    pntsSizeMode: PNTS_SIZE_MODE.ATTENUATED,
+                    sseThreshold: 2,
+                });
+
+                // Add an event for picking the 3D Tiles layer and displaying
+                // information about the picked feature in an html div
+                const pickingArgs = {
+                    htmlDiv: document.getElementById('featureInfo'),
+                    view,
+                    layer: window.layer,
+                };
+
+                // Add the layer to our view
+                view.addLayer(window.layer).then((layer) => {
+                    zoomToLayer(view, layer);
+                    window.addEventListener('click',
+                        (event) => fillHTMLWithPickingInfo(event, pickingArgs), false);
+                });
+
+                window.layer.whenReady
+                    .then(() => debug.createOGC3DTilesDebugUI(gui, view, window.layer));
+            }
+
+            function loadLyon() {
+                setUrl("https://raw.githubusercontent.com/iTowns/iTowns2-sample-data/refs/heads/master/3DTiles/lyon1-4978/tileset.json");
+            }
+
+            function loadSete() {
+                setUrl("https://raw.githubusercontent.com/iTowns/iTowns2-sample-data/master/pointclouds/pnts-sete-2021-0756_6256/tileset.json");
+            }
+
+            function loadLille() {
+                setUrl("https://webimaging.lillemetropole.fr/externe/maillage/2020_mel_5cm/tileset.json");
+            }
+
+            const readUrlButton = document.getElementById('readURLButton');
+
+            const loadLyonButton = document.getElementById('loadLyonButton');
+            const loadSeteButton = document.getElementById('loadSeteButton');
+            const loadLilleButton = document.getElementById('loadLilleButton');
+
+            loadLyonButton.addEventListener('click', loadLyon);
+            loadSeteButton.addEventListener('click', loadSete);
+            loadLilleButton.addEventListener('click', loadLille);
+            readUrlButton.addEventListener('click', readURL);
+
+            window.readURL = readURL;
+            window.loadLyon = loadLyon;
+            window.loadSete = loadSete;
+            window.loadLille = loadLille;
+            window.view = view;
+            window.itowns = itowns;
+            window.THREE = THREE;
+
+            function loadPassedModel() {
+                const passedUrl = uri.searchParams.get('3dtiles');
+                if (passedUrl) {
+                    setUrl(passedUrl);
+                }
+            }
+            loadPassedModel();
+
+        </script>
+    </body>
+</html>

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Custom popup</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "dat": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js",
+                "GuiTools": "./jsm/GUI/GuiTools.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+        </script>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" type="text/css" href="css/example.css">
+    <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+    <style>
+        .bubble {
+            background-color: #fff;
+            border-radius: 10px;
+            text-align: center;
+            padding: 10px 15px;
+            box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, .3), 0 0.0625rem 0.125rem rgba(0, 0, 0, .2);
+        }
+        .pointer {
+            height: 12px;
+            width: 12px;
+            background-color: #fff;
+            transform: translate(-50%, -50%) rotate(45deg);
+            position: relative;
+            left: 80%;
+        }
+    </style>
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+<div id="description">
+    Clicking a position while holding `p` key down will pop a custom popup.
+</div>
+<div id="viewerDiv" class="viewer"></div>
+
+<script type="module">
+
+    import GuiTools from 'GuiTools';
+    import * as THREE from 'three';
+    import * as itowns from 'itowns';
+    import * as debug from 'debug';
+    import * as itowns_widgets from 'itowns_widgets';
+
+    // Setup view and layers
+    const placement = {
+        coord: new itowns.Coordinates('EPSG:4326', 3.5, 44),
+        range: 1000000,
+    };
+    const viewerDiv = document.getElementById('viewerDiv');
+    const view = new itowns.GlobeView(viewerDiv, placement);
+    var menuGlobe = new GuiTools('menuDiv', view);
+    itowns.Fetcher.json('./layers/JSONLayers/Ortho.json').then(function _(config) {
+        config.source = new itowns.WMTSSource(config.source);
+        view.addLayer(new itowns.ColorLayer('Ortho', config));
+    });
+    function addElevationLayerFromConfig(config) {
+        config.source = new itowns.WMTSSource(config.source);
+        view.addLayer(new itowns.ElevationLayer(config.id, config));
+    }
+    itowns.Fetcher.json('./layers/JSONLayers/IGN_MNT_HIGHRES.json').then(addElevationLayerFromConfig);
+    itowns.Fetcher.json('./layers/JSONLayers/WORLD_DTM.json').then(addElevationLayerFromConfig);
+    debug.createTileDebugUI(menuGlobe.gui, view);
+
+    // Create a custom div which will be displayed as a label
+    const customDiv = document.createElement('div');
+    const bubble = document.createElement('div');
+    bubble.classList.add('bubble');
+    customDiv.appendChild(bubble);
+    const pointer = document.createElement('div');
+    pointer.classList.add('pointer');
+    customDiv.appendChild(pointer);
+
+    // Define a method to set the content of custom label
+    function setLabelContent(properties) {
+        const coord = properties.position.as('EPSG:4326');
+        bubble.textContent = `
+            lon : ${Math.round(coord.x * 100) / 100}° |
+            lat : ${Math.round(coord.y * 100) / 100}° |
+            alt : ${Math.round(coord.z)}m `;
+        return customDiv;
+    }
+
+    // Add a Label on `p` + click
+    let pickMode = false;
+    viewerDiv.addEventListener('keydown', function () {
+        if (event.key === 'p') { pickMode = true; }
+    }, false);
+    viewerDiv.addEventListener('keyup', function () {
+        if (event.key === 'p') { pickMode = false; }
+    }, false);
+    viewerDiv.addEventListener('mousedown', addFeatureFromMouseEvent, false);
+
+    // this const shall receive the mouse coordinates when user clicks while holding `p` pressed
+    const featureCoord = new itowns.Coordinates(view.referenceCrs);
+
+    function addFeatureFromMouseEvent(event) {
+        if (!pickMode) {
+            return;
+        }
+
+        featureCoord.setFromVector3(view.getPickingPositionFromDepth(view.eventToViewCoords(event)));
+
+        const features = createFeatureAt(featureCoord);
+
+        // the source of the feature layer
+        const source = new itowns.FileSource({ features });
+
+        // create labelLayer
+        const layer = new itowns.LabelLayer('idLabelLayer', {
+            source: source,
+            domElement: setLabelContent,
+            style: {
+                text: { anchor: [-0.8, -1] },
+            },
+        });
+
+        view.addLayer(layer);
+
+        // remove mouse event listener to prevent adding other layer sharing `idLabelLayer` id
+        viewerDiv.removeEventListener('mousedown', addFeatureFromMouseEvent, false);
+    }
+
+    function createFeatureAt(coordinate) {
+        // create new featureCollection
+        const collection = new itowns.FeatureCollection({
+            crs: view.tileLayer.extent.crs,
+        });
+
+        // create new feature
+        const feature = collection.requestFeatureByType(itowns.FEATURE_TYPES.POINT);
+
+        // add geometries to feature
+        const geometry = feature.bindNewGeometry();
+        geometry.startSubGeometry(1, feature);
+        geometry.pushCoordinates(feature, coordinate);
+        geometry.properties.position = coordinate;
+
+        geometry.updateExtent();
+        feature.updateExtent(geometry);
+        collection.updateExtent(feature.extent);
+
+        return collection;
+    }
+</script>
+</body>
+</html>

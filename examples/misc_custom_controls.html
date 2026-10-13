@@ -1,0 +1,113 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Itowns - Custom controls</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "dat": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js",
+                "GuiTools": "./jsm/GUI/GuiTools.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+        </script>
+
+    <link rel="stylesheet" type="text/css" href="css/example.css">
+    <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+</head>
+<body>
+<div id="description">
+    Key bindings
+    <ul>
+        <li>Left-click + drag : rotate the globe</li>
+        <li>Wheel-click + drag : rotate the camera around its target</li>
+        <li>Ctrl + left-click + drag : rotate the camera around its position</li>
+        <li>Mouse wheel up/down : zoom in/out</li>
+        <li>Double left-click : zoom in</li>
+        <li>Double right-click : zoom out</li>
+        <li>Right-click + drag up/down : zoom in/out</li>
+    </ul>
+</div>
+<div id="viewerDiv"></div>
+
+<script type="module">
+
+    import GuiTools from 'GuiTools';
+    import * as THREE from 'three';
+    import * as itowns from 'itowns';
+    import * as debug from 'debug';
+    import * as itowns_widgets from 'itowns_widgets';
+    import setupLoadingScreen from 'LoadingScreen';
+
+    const viewerDiv = document.getElementById('viewerDiv');
+    const placement = {
+        coord: new itowns.Coordinates('EPSG:4326', 2.351323, 48.856712),
+        range: 25000000,
+    }
+    const view = new itowns.GlobeView(viewerDiv, placement);
+    setupLoadingScreen(viewerDiv, view);
+
+    // Add imagery and elevation layers
+    itowns.Fetcher.json('./layers/JSONLayers/Ortho.json').then(function (config) {
+        config.source = new itowns.WMTSSource(config.source);
+        view.addLayer(
+            new itowns.ColorLayer('Ortho', config),
+        );
+    })
+    function addElevationLayerFromConfig(config) {
+        config.source = new itowns.WMTSSource(config.source);
+        view.addLayer(
+            new itowns.ElevationLayer(config.id, config),
+        );
+    }
+    itowns.Fetcher.json('./layers/JSONLayers/IGN_MNT_HIGHRES.json').then(addElevationLayerFromConfig);
+    itowns.Fetcher.json('./layers/JSONLayers/WORLD_DTM.json').then(addElevationLayerFromConfig);
+
+    const customControls = {
+        // Disable pan movement
+        PAN: {
+            enable: false,
+        },
+        // Change the key bindings for globe rotation
+        MOVE_GLOBE: {
+            enable: true,
+            mouseButton: THREE.MOUSE.LEFT,
+        },
+        // Change the key bindings for orbit movement (rotation around the camera target)
+        ORBIT: {
+            enable: true,
+            mouseButton: THREE.MOUSE.MIDDLE,
+        },
+        // Change the key bindings for dolly movement
+        DOLLY: {
+            enable: true,
+            mouseButton: THREE.MOUSE.RIGHT,
+        },
+        // Change the key bindings for panoramic movement (rotation around the camera position)
+        PANORAMIC: {
+            enable: true,
+            mouseButton: THREE.MOUSE.LEFT,
+            keyboard: 17,  // keyCode for the ctrl key
+        },
+        // Allow travel out movement when double right-clicking
+        TRAVEL_OUT: {
+            enable: true,
+            mouseButton: THREE.MOUSE.RIGHT,
+            double: true,
+        },
+    }
+
+    // Modify view's control to be set as the custom controls we just defined
+    view.controls.states.setFromOptions(customControls);
+</script>
+</body>
+</html>

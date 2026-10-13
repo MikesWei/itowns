@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Itowns - collada</title>
+
+        <script type="importmap">
+        {
+            "imports": {
+                "itowns": "../dist/itowns.js",
+                "debug": "../dist/debug.js",
+                "dat": "https://unpkg.com/dat.gui@0.7.9/build/dat.gui.module.js",
+                "GuiTools": "./jsm/GUI/GuiTools.js",
+                "LoadingScreen": "./jsm/GUI/LoadingScreen.js",
+                "itowns_widgets": "../dist/itowns_widgets.js",
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+        </script>
+
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+        <link rel="stylesheet" type="text/css" href="css/example.css">
+        <link rel="stylesheet" type="text/css" href="css/LoadingScreen.css">
+
+    </head>
+    <body>
+        <div id="viewerDiv"></div>
+
+        <!-- Import iTowns source code -->
+
+        <!-- Import iTowns LoadingScreen and GuiTools plugins -->
+
+        <script type="module">
+
+            import GuiTools from 'GuiTools';
+            import setupLoadingScreen from 'LoadingScreen';
+            import * as THREE from 'three';
+            import * as itowns from 'itowns';
+            import * as debug from 'debug';
+            import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
+
+            // ---------- CREATE A GlobeView FOR SUPPORTING DATA VISUALIZATION : ----------
+
+            // Define camera initial position
+            const placement = {
+                coord: new itowns.Coordinates('EPSG:4326', 4.21655, 44.84415),
+                range: 500,
+                heading: 180,
+                tilt: 60,
+            };
+
+            // `viewerDiv` will contain iTowns' rendering area (`<canvas>`)
+            const viewerDiv = document.getElementById('viewerDiv');
+
+            // Create a GlobeView
+            const view = new itowns.GlobeView(viewerDiv, placement);
+
+            // Setup loading screen and debug menu
+            setupLoadingScreen(viewerDiv, view);
+            const debugMenu = new GuiTools('menuDiv', view);
+
+            // Add ambient light to globally illuminates all objects
+            const light = new THREE.AmbientLight(0x404040, 40);
+            view.scene.add(light);
+
+
+            // ---------- DISPLAY CONTEXTUAL DATA : ----------
+
+            // Display ortho-images
+            itowns.Fetcher.json('./layers/JSONLayers/Ortho.json')
+                .then(function _(config) {
+                    config.source = new itowns.WMTSSource(config.source);
+                    view.addLayer(
+                        new itowns.ColorLayer('Ortho', config),
+                    ).then(debugMenu.addLayerGUI.bind(debugMenu));
+                });
+
+            // Display elevation data
+            function addElevationLayerFromConfig(config) {
+                config.source = new itowns.WMTSSource(config.source);
+                view.addLayer(
+                    new itowns.ElevationLayer(config.id, config),
+                ).then(debugMenu.addLayerGUI.bind(debugMenu));
+            }
+            itowns.Fetcher.json('./layers/JSONLayers/IGN_MNT_HIGHRES.json')
+                .then(addElevationLayerFromConfig);
+            itowns.Fetcher.json('./layers/JSONLayers/WORLD_DTM.json')
+                .then(addElevationLayerFromConfig);
+
+
+
+
+            // ---------- DISPLAY COLLADA DATA : ----------
+
+            const url = 'https://raw.githubusercontent.com/iTowns/iTowns2-sample-data/master/models/collada/building.dae';
+
+            const loader = new ColladaLoader();
+            loader.load(url, function (collada) {
+                // collada.scene is a THREE.Scene object; adding it directly
+                // to view.scene can break the iTowns rendering (black
+                // screen) if it contains a light source
+                const model = new THREE.Group();
+                for(const child of collada.scene.children) {
+                    if (child.type !== "PointLight") {
+                        model.add(child);
+                    }
+                }
+
+                // building coordinate
+                const coord = new itowns.Coordinates(
+                    'EPSG:4326', 4.2165, 44.844, 1417,
+                );
+
+                model.position.copy(coord.as(view.referenceCrs));
+                // align up vector with geodesic normal
+                model.lookAt(model.position.clone().add(coord.geodesicNormal));
+                // user rotate building to align with ortho image
+                model.rotateZ(-Math.PI * 0.2);
+                model.scale.set(1.2, 1.2, 1.2);
+
+                // update coordinate of the mesh
+                model.updateMatrixWorld();
+
+                view.scene.add(model);
+                view.notifyChange();
+            });
+
+
+            // Warning: the following code is not part of this example, those
+            // variables are only exposed for internal functional test uses.
+            window.view = view;
+
+            window.view = view;
+            window.itowns = itowns;
+            window.THREE = THREE;
+
+        </script>
+    </body>
+</html>
